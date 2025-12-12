@@ -1,0 +1,9 @@
+# .htaccess
+DirectoryIndex dashboard.php index.php index.html
+
+# Or if you want to redirect from index.php to dashboard.php
+RewriteEngine On
+RewriteRule ^index\.php$ /dashboard.php [R=301,L]
+
+# Or make dashboard.php the only entry point
+RewriteRule ^$ dashboard.php [L]
