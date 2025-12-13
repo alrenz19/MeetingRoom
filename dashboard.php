@@ -64,11 +64,8 @@ $area_name = '';
 if ($selected_area > 0) {
     $area_name = get_area_name($selected_area);
 } elseif ($selected_room > 0) {
-    // Get area name from room
-    $room_info = get_booking_by_id($selected_room);
-    if ($room_info && isset($room_info['area_name'])) {
-        $area_name = $room_info['area_name'];
-    }
+    // Get area name from room directly
+    $area_name = get_area_name_by_room($selected_room);
 }
 
 // Check if user is logged in
@@ -115,6 +112,54 @@ header {
     color: white;
     padding: 25px 30px;
     position: relative;
+}
+
+/* Autocomplete Suggestions */
+.suggestion-container {
+    position: relative;
+}
+
+.suggestion-list {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.suggestion-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s;
+}
+
+.suggestion-item:hover {
+    background-color: #f0f9ff;
+}
+
+.suggestion-name {
+    font-weight: 500;
+    color: #333;
+}
+
+.suggestion-email {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.suggestion-selected {
+    background-color: #dbeafe;
 }
 
 .header-content {
@@ -245,6 +290,7 @@ header {
 
 .legend-available { background: #10b981; }
 .legend-booked { background: #ef4444; }
+.legend-current-user { background: #8b5cf6; }
 .legend-internal { background: #3b82f6; }
 .legend-external { background: #f59e0b; }
 .legend-tentative { background: #8b5cf6; }
@@ -387,8 +433,8 @@ header {
     padding: 20px;
     margin-bottom: 25px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    overflow: visible;
-    max-height: 400px;
+    overflow-x: auto;
+    min-height: 400px;
 }
 
 .room-grid {
@@ -396,6 +442,35 @@ header {
     grid-template-columns: 140px repeat(<?php echo min(count($time_slots), 24); ?>, 1fr);
     gap: 2px;
     min-width: 800px;
+    width: fit-content;
+}
+
+/* Autocomplete Suggestions */
+.suggestion-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.suggestion-item:hover {
+    background-color: #f0f9ff;
+}
+
+.suggestion-name {
+    font-weight: 500;
+    color: #333;
+}
+
+.suggestion-email {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.suggestion-selected {
+    background-color: #dbeafe;
 }
 
 .grid-header {
@@ -447,6 +522,7 @@ header {
     transition: all 0.2s;
     border: 2px solid transparent;
     border-radius: 6px;
+    z-index: 1;
 }
 
 .time-cell:hover {
@@ -467,7 +543,18 @@ header {
 
 .time-cell.booked {
     background: #fee2e2;
-    cursor: not-allowed;
+    cursor: pointer;
+}
+
+.time-cell.booked.current-user {
+    background: #e0e7ff;
+    border: 2px solid #8b5cf6;
+}
+
+.time-cell.booked.current-user:hover {
+    background: #d1d5ff;
+    transform: scale(1.02);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
 }
 
 .booking-event {
@@ -481,11 +568,19 @@ header {
     padding: 8px;
     font-size: 0.85rem;
     overflow: hidden;
-    z-index: 1;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     justify-content: center;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.booking-event:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    z-index: 3;
 }
 
 .booking-event.internal {
@@ -500,6 +595,15 @@ header {
     background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
     opacity: 0.9;
     border: 2px dashed rgba(255, 255, 255, 0.5);
+}
+
+.booking-event.current-user {
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    border: 2px solid #ffffff;
+}
+
+.booking-event.current-user:hover {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
 }
 
 .event-title {
@@ -524,8 +628,7 @@ header {
     margin-top: 25px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     border-left: 5px solid #3b82f6;
-    overflow: visible;
-    max-height: 400px;
+    min-height: 400px;
 }
 
 .panel-header {
@@ -952,6 +1055,150 @@ header {
     box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
 }
 
+.btn-edit {
+    flex: 1;
+    padding: 14px;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-edit:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(245, 158, 11, 0.3);
+}
+
+.btn-delete {
+    flex: 1;
+    padding: 14px;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-delete:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+}
+
+/* Booking Details Styles */
+.booking-details {
+    background: white;
+    padding: 25px;
+    border-radius: 12px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.booking-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.booking-details-header h2 {
+    color: #1e3a8a;
+    font-size: 1.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.booking-status-badge {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.booking-status-badge.confirmed {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.booking-status-badge.tentative {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.booking-status-badge.cancelled {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.booking-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 25px;
+}
+
+.booking-info-item {
+    padding: 15px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border-left: 4px solid #3b82f6;
+}
+
+.booking-info-item h3 {
+    color: #475569;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.booking-info-item p {
+    color: #1e293b;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.booking-description {
+    padding: 20px;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    border-left: 4px solid #10b981;
+}
+
+.booking-description h3 {
+    color: #475569;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.booking-description-content {
+    color: #1e293b;
+    font-size: 1rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.booking-actions {
+    display: flex;
+    gap: 15px;
+    margin-top: 25px;
+    padding-top: 25px;
+    border-top: 2px solid #e2e8f0;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .main-content {
@@ -983,7 +1230,7 @@ header {
     }
     
     .room-grid-container {
-        max-height: 350px;
+        min-height: 350px;
     }
     
     .available-slots-grid {
@@ -1050,7 +1297,7 @@ header {
     
     .room-grid-container {
         padding: 15px;
-        max-height: 300px;
+        min-height: 300px;
     }
     
     .available-slots-grid {
@@ -1075,6 +1322,10 @@ header {
     .action-buttons {
         flex-direction: column;
     }
+    
+    .booking-actions {
+        flex-direction: column;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1084,7 +1335,7 @@ header {
     }
     
     .room-grid-container {
-        max-height: 250px;
+        min-height: 250px;
     }
     
     .room-cell, .grid-header {
@@ -1274,7 +1525,11 @@ header {
                         </div>
                         <div class="legend-item">
                             <div class="legend-color legend-booked"></div>
-                            <span class="legend-text">Booked Slot</span>
+                            <span class="legend-text">Booked Slot (Others)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color legend-current-user"></div>
+                            <span class="legend-text">Your Booking</span>
                         </div>
                         <div class="legend-item">
                             <div class="legend-color legend-internal"></div>
@@ -1365,39 +1620,48 @@ header {
                             </div>
                             
                             <!-- Time Cells -->
-                            <?php foreach ($time_slots as $slot): 
-                                $slot_start = $slot['timestamp'];
-                                $slot_end = $slot_start + 1800;
-                                $is_booked = false;
-                                $booking_info = null;
-                                
-                                // Check if this slot is booked (with 2-minute buffer)
-                                $buffer = 120; // 2 minutes in seconds
-                                foreach ($room_bookings as $booking) {
-                                    // Check for overlap considering buffer
-                                    if (!(($slot_end - $buffer) <= $booking['start_time'] || 
-                                          ($slot_start + $buffer) >= $booking['end_time'])) {
-                                        $is_booked = true;
-                                        $booking_info = $booking;
-                                        break;
+                                <?php foreach ($time_slots as $slot): 
+                                    $slot_start = $slot['timestamp'];
+                                    $slot_end = $slot_start + 1800;
+                                    $is_booked = false;
+                                    $booking_info = null;
+                                    
+                                    // Check if this slot is booked (with 2-minute buffer)
+                                    $buffer = 120; // 2 minutes in seconds
+                                    foreach ($room_bookings as $booking) {
+                                        // Check for overlap considering buffer
+                                        if (!(($slot_end - $buffer) <= $booking['start_time'] || 
+                                            ($slot_start + $buffer) >= $booking['end_time'])) {
+                                            $is_booked = true;
+                                            $booking_info = $booking;
+                                            
+                                            // Add owner info to booking array for JavaScript
+                                            $booking_info['is_current_user'] = is_booking_owner($booking['create_by'] ?? '');
+                                            break;
+                                        }
                                     }
-                                }
-                            ?>
-                                <div class="time-cell <?php echo $is_booked ? 'booked' : 'available'; ?>" 
+                                ?>
+                                <div class="time-cell <?php echo $is_booked ? 'booked' : 'available'; ?><?php echo ($is_booked && isset($booking_info['is_current_user']) && $booking_info['is_current_user']) ? ' current-user' : ''; ?>" 
                                      data-start="<?php echo date('H:i', $slot_start); ?>"
                                      data-start-timestamp="<?php echo $slot_start; ?>"
                                      data-end="<?php echo date('H:i', $slot_end); ?>"
                                      data-end-timestamp="<?php echo $slot_end; ?>"
-                                     onclick="<?php echo !$is_booked ? ($is_logged_in ? 'selectSlot(this)' : 'showLoginAlert()') : ''; ?>"
+                                     onclick="<?php echo !$is_booked ? ($is_logged_in ? 'selectSlot(this)' : 'showLoginAlert()') : 'void(0)'; ?>"
                                      title="<?php echo !$is_booked ? ($is_logged_in ? 'Click to book this slot (2-minute buffer between bookings)' : 'Login to book') : 'Already booked'; ?>">
                                     
                                     <?php if ($is_booked && $booking_info): ?>
                                         <div class="booking-event <?php 
                                             echo $booking_info['type'] == 'I' ? 'internal' : 'external';
                                             echo $booking_info['status'] == 1 ? ' tentative' : '';
-                                        ?>">
+                                            echo (isset($booking_info['is_current_user']) && $booking_info['is_current_user']) ? ' current-user' : '';
+                                        ?>"
+                                        onclick="showBookingDetails(<?php echo htmlspecialchars(json_encode($booking_info)); ?>)"
+                                        title="Click to view booking details<?php echo (isset($booking_info['is_current_user']) && $booking_info['is_current_user']) ? ' (Your booking)' : ''; ?>">
                                             <div class="event-title">
                                                 <?php echo htmlspecialchars(substr($booking_info['name'], 0, 18)); ?>
+                                                <?php if (isset($booking_info['is_current_user']) && $booking_info['is_current_user']): ?>
+                                                    <i class="fas fa-user" style="margin-left: 5px; font-size: 0.7rem;"></i>
+                                                <?php endif; ?>
                                             </div>
                                             <div class="event-time">
                                                 <?php 
@@ -1501,6 +1765,224 @@ header {
             </div>
         </div>
     </div>
+
+    <!-- Edit Booking Modal -->
+<div id="editBookingModal" class="modal-overlay" onclick="if(event.target === this) closeEditModal()">
+    <div class="modal" style="width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+            <h2><i class="fas fa-edit"></i> Edit Booking</h2>
+        </div>
+        
+        <form id="editBookingForm" method="POST" action="update_booking.php">
+            <input type="hidden" id="edit_booking_id" name="booking_id">
+            <input type="hidden" id="edit_room_id" name="room_id" value="<?php echo $selected_room; ?>">
+            <input type="hidden" id="edit_area_id" name="area_id" value="<?php echo $selected_area; ?>">
+            <input type="hidden" id="edit_start_time" name="start_time">
+            <input type="hidden" id="edit_end_time" name="end_time">
+            
+            <!-- Event Information -->
+            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eef2f7;">
+                <h3 style="color: #667eea; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-info-circle"></i> Event Information
+                </h3>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-heading"></i> Event Name *
+                        </label>
+                        <input type="text" id="edit_event_name" name="event_name" required style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="Enter event name">
+                    </div>
+                    
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-users"></i> Event Type
+                        </label>
+                        <select id="edit_event_type" name="event_type" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" onchange="toggleEditExternalFields()">
+                            <option value="I">Internal Meeting</option>
+                            <option value="E">External Event</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                        <i class="fas fa-file-alt"></i> Brief Description *
+                    </label>
+                    <textarea id="edit_brief_desc" name="brief_desc" required rows="2" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="Short description of the event"></textarea>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                        <i class="fas fa-align-left"></i> Full Description (Optional)
+                    </label>
+                    <textarea id="edit_full_desc" name="full_desc" rows="3" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="Detailed description of the event"></textarea>
+                </div>
+            </div>
+
+            <!-- Date & Time Information -->
+            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eef2f7;">
+                <h3 style="color: #667eea; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-clock"></i> Date & Time
+                </h3>
+                
+                <div id="editSelectedSlotInfo" style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #3b82f6;">
+                    <strong id="editSlotDetails">
+                        <!-- Will be filled by JavaScript -->
+                    </strong>
+                </div>
+                
+                <div id="editConflictWarning" style="display: none; background: #fef3c7; border: 1px solid #fbbf24; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                    <p style="color: #92400e; margin: 0; display: flex; align-items: center; gap: 10px;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span id="editConflictMessage"></span>
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-calendar-day"></i> Start Date
+                        </label>
+                        <input type="date" id="edit_start_date" name="start_date" required style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" 
+                               value="<?php echo $selected_date; ?>">
+                    </div>
+                    
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-clock"></i> Start Time
+                        </label>
+                        <input type="time" id="edit_start_time_input" name="start_time_input" required style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                    </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-calendar-day"></i> End Date
+                        </label>
+                        <input type="date" id="edit_end_date" name="end_date" required style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;"
+                               value="<?php echo $selected_date; ?>">
+                    </div>
+                    
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            <i class="fas fa-clock"></i> End Time
+                        </label>
+                        <input type="time" id="edit_end_time_input" name="end_time_input" required style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 12px; background: #f0f9ff; border-radius: 8px; text-align: center;">
+                    <i class="fas fa-hourglass-half"></i>
+                    <span id="editDurationText" style="font-weight: 500; color: #1e40af;">Duration: </span>
+                </div>
+                
+                <div style="margin-top: 10px; padding: 10px; background: #fffbeb; border-radius: 6px; border: 1px solid #fef3c7;">
+                    <p style="color: #92400e; margin: 0; font-size: 0.9rem;">
+                        <i class="fas fa-info-circle"></i> Note: A 2-minute buffer is maintained between bookings for room preparation.
+                    </p>
+                </div>
+            </div>
+
+            <!-- External Event Fields (Hidden by default) -->
+            <div id="editExternalFields" style="display: none; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eef2f7;">
+                <h3 style="color: #1e40af; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-external-link-alt"></i> External Event Details
+                </h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                        <i class="fas fa-user-tie"></i> Representative Name *
+                    </label>
+                    <input type="text" id="edit_representative" name="representative" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="Enter representative name">
+                    </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 15px; font-weight: 500; color: #333;">
+                        <i class="fas fa-tools"></i> Things to Prepare (Select at least one)
+                    </label>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="edit_needs_water" name="needs_water" value="1"> Water
+                        </label>
+                        
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="edit_needs_whiteboard" name="needs_whiteboard" value="1"> Whiteboard
+                        </label>
+                        
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="edit_needs_coffee" name="needs_coffee" value="1"> Coffee
+                        </label>
+                        
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="edit_needs_projector" name="needs_projector" value="1"> Projector
+                        </label>
+                        
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="edit_needs_snacks" name="needs_snacks" value="1"> Snacks
+                        </label>
+                    </div>
+                    
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                            Other Preparations
+                        </label>
+                        <textarea id="edit_other_preparations" name="other_preparations" rows="2" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" placeholder="Any other preparation requirements"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification Settings with Auto-suggest -->
+            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eef2f7;">
+                <h3 style="color: #667eea; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-bell"></i> Notification Settings
+                </h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
+                        <i class="fas fa-envelope"></i> Send Notification To
+                    </label>
+                    
+                    <!-- Email input with autocomplete -->
+                    <div class="suggestion-container">
+                        <textarea id="edit_notification_emails" name="notification_emails" rows="2" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" 
+                                placeholder="Start typing a name or email..."></textarea>
+                        <div id="editEmailSuggestions" class="suggestion-list"></div>
+                    </div>
+                    
+                    <small style="color: #64748b; display: block; margin-top: 5px;">
+                        Start typing a name to see suggestions. You can add multiple emails separated by commas.
+                    </small>
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 15px; font-weight: 500; color: #333;">
+                        <i class="fas fa-check-circle"></i> Confirmation Status
+                    </label>
+                    <div style="display: flex; gap: 20px;">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="radio" id="edit_confirmation_tentative" name="confirmation_status" value="tentative"> Tentative
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="radio" id="edit_confirmation_confirmed" name="confirmation_status" value="confirmed" checked> Confirmed
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div style="display: flex; gap: 15px; margin-top: 30px;">
+                <button type="button" class="btn-cancel" onclick="closeEditModal()" style="flex: 1; padding: 14px;">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button type="submit" class="btn-submit" id="editSubmitBookingBtn" style="flex: 1; padding: 14px;">
+                    <i class="fas fa-save"></i> Update Booking
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
     <!-- Booking Modal (Detailed Form) -->
     <div id="bookingModal" class="modal-overlay" onclick="if(event.target === this) closeModal()">
@@ -1708,11 +2190,19 @@ header {
                     
                     <div style="margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #333;">
-                            <i class="fas fa-envelope"></i> Send Notification To (Multiple emails, comma separated)
+                            <i class="fas fa-envelope"></i> Send Notification To
                         </label>
-                        <textarea name="notification_emails" rows="2" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" 
-                                  placeholder="email1@example.com, email2@example.com"></textarea>
-                        <small style="color: #64748b; display: block; margin-top: 5px;">Enter multiple email addresses separated by commas</small>
+                        
+                        <!-- Email input with autocomplete -->
+                        <div class="suggestion-container">
+                            <textarea id="notification_emails" name="notification_emails" rows="2" style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px;" 
+                                    placeholder="Start typing a name or email..."></textarea>
+                            <div id="emailSuggestions" class="suggestion-list"></div>
+                        </div>
+                        
+                        <small style="color: #64748b; display: block; margin-top: 5px;">
+                            Start typing a name to see suggestions. You can add multiple emails separated by commas.
+                        </small>
                     </div>
                     
                     <div>
@@ -1775,6 +2265,67 @@ header {
         </div>
     </div>
 
+    <!-- Booking Details Modal -->
+    <div id="bookingDetailsModal" class="modal-overlay" onclick="if(event.target === this) closeBookingDetailsModal()">
+        <div class="modal" style="width: 600px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+            <div class="booking-details-header">
+                <h2><i class="fas fa-calendar-check"></i> Booking Details</h2>
+                <div id="bookingStatusBadge" class="booking-status-badge"></div>
+            </div>
+            
+            <div class="booking-info-grid">
+                <div class="booking-info-item">
+                    <h3>Event Name</h3>
+                    <p id="detailEventName"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Booked By</h3>
+                    <p id="detailBookedBy"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Event Type</h3>
+                    <p id="detailEventType"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Room</h3>
+                    <p id="detailRoomName"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Date</h3>
+                    <p id="detailDate"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Time</h3>
+                    <p id="detailTime"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Duration</h3>
+                    <p id="detailDuration"></p>
+                </div>
+                
+                <div class="booking-info-item">
+                    <h3>Created</h3>
+                    <p id="detailCreated"></p>
+                </div>
+            </div>
+            
+            <div class="booking-description">
+                <h3>Description</h3>
+                <div class="booking-description-content" id="detailDescription"></div>
+            </div>
+            
+            <div class="booking-actions" id="bookingActions">
+                <!-- Action buttons will be added here by JavaScript -->
+            </div>
+        </div>
+    </div>
+
     <!-- Login Alert Modal -->
     <div id="loginModal" class="modal-overlay" onclick="closeLoginModal()">
         <div class="modal">
@@ -1805,14 +2356,234 @@ header {
         // Global variables
         let selectedTime = '';
         let isCheckingConflicts = false;
-        
-        // Show login alert for non-logged in users
-        function showLoginAlert() {
-            document.getElementById('loginModal').style.display = 'flex';
+        let currentBookingDetails = null;
+        let userList = [];
+
+        // Load user data for autocomplete
+        async function loadUserData() {
+            try {
+                const response = await fetch('get_users.php');
+                const data = await response.json();
+                userList = data.users || [];
+                console.log('Loaded users:', userList.length);
+            } catch (error) {
+                console.error('Error loading user data:', error);
+            }
         }
-        
-        function closeLoginModal() {
-            document.getElementById('loginModal').style.display = 'none';
+
+        // Show autocomplete suggestions
+        function showEmailSuggestions(inputElement, suggestionsDiv, isEdit = false) {
+            const inputValue = inputElement.value;
+            
+            // Get the current input (last email if multiple)
+            const emails = inputValue.split(',').map(e => e.trim());
+            const currentInput = emails[emails.length - 1].toLowerCase();
+            
+            if (!currentInput.trim()) {
+                suggestionsDiv.style.display = 'none';
+                return;
+            }
+            
+            // Filter users based on input (excluding already selected emails)
+            const selectedEmails = new Set(
+                emails.slice(0, -1).filter(email => email.includes('@'))
+            );
+            
+            const filteredUsers = userList.filter(user => {
+                // Skip if email is already selected
+                if (selectedEmails.has(user.email)) {
+                    return false;
+                }
+                
+                // Check if input matches name or email
+                const nameMatch = user.display_name.toLowerCase().includes(currentInput);
+                const emailMatch = user.email.toLowerCase().includes(currentInput);
+                
+                return nameMatch || emailMatch;
+            });
+            
+            if (filteredUsers.length === 0) {
+                suggestionsDiv.style.display = 'none';
+                return;
+            }
+            
+            // Build suggestions HTML
+            let suggestionsHTML = '';
+            filteredUsers.forEach(user => {
+                suggestionsHTML += `
+                    <div class="suggestion-item" onclick="selectSuggestion(this, '${user.email}', '${user.display_name}', ${isEdit})">
+                        <span class="suggestion-name">${user.display_name}</span>
+                        <span class="suggestion-email">${user.email}</span>
+                    </div>
+                `;
+            });
+            
+            suggestionsDiv.innerHTML = suggestionsHTML;
+            suggestionsDiv.style.display = 'block';
+            
+            // Position the suggestions div
+            const rect = inputElement.getBoundingClientRect();
+            suggestionsDiv.style.width = rect.width + 'px';
+            suggestionsDiv.style.top = (rect.height + 5) + 'px';
+            suggestionsDiv.style.left = '0';
+        }
+
+        // Select suggestion
+        function selectSuggestion(element, email, displayName, isEdit = false) {
+            const textarea = isEdit ? 
+                document.getElementById('edit_notification_emails') : 
+                document.getElementById('notification_emails');
+            
+            const currentValue = textarea.value.trim();
+            const emails = currentValue.split(',').map(e => e.trim());
+            
+            // Remove the current partial input (last item)
+            emails.pop();
+            
+            // Add the selected email
+            emails.push(email);
+            
+            // Join back with commas and space
+            textarea.value = emails.join(', ');
+            
+            // Highlight the selected suggestion briefly
+            element.classList.add('suggestion-selected');
+            setTimeout(() => {
+                element.classList.remove('suggestion-selected');
+            }, 300);
+            
+            // Hide suggestions
+            const suggestionsDiv = isEdit ? 
+                document.getElementById('editEmailSuggestions') : 
+                document.getElementById('emailSuggestions');
+            suggestionsDiv.style.display = 'none';
+            
+            // Focus back on textarea and move cursor to end
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+
+        // Initialize autocomplete for both modals
+        function initAutocomplete() {
+            // For new booking modal
+            const emailInput = document.getElementById('notification_emails');
+            const suggestionsDiv = document.getElementById('emailSuggestions');
+            
+            if (emailInput && suggestionsDiv) {
+                // Show suggestions on focus
+                emailInput.addEventListener('focus', function() {
+                    if (this.value.trim()) {
+                        showEmailSuggestions(this, suggestionsDiv, false);
+                    }
+                });
+                
+                // Show suggestions on input
+                emailInput.addEventListener('input', function() {
+                    showEmailSuggestions(this, suggestionsDiv, false);
+                });
+                
+                // Handle arrow keys for navigation
+                emailInput.addEventListener('keydown', function(e) {
+                    const suggestions = suggestionsDiv.querySelectorAll('.suggestion-item');
+                    if (!suggestions.length || suggestionsDiv.style.display === 'none') return;
+                    
+                    let currentIndex = -1;
+                    suggestions.forEach((item, index) => {
+                        if (item.classList.contains('suggestion-selected')) {
+                            currentIndex = index;
+                        }
+                    });
+                    
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const nextIndex = (currentIndex + 1) % suggestions.length;
+                        selectSuggestionWithKeyboard(suggestions, nextIndex, false);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        const prevIndex = currentIndex <= 0 ? suggestions.length - 1 : currentIndex - 1;
+                        selectSuggestionWithKeyboard(suggestions, prevIndex, false);
+                    } else if (e.key === 'Enter' && currentIndex >= 0) {
+                        e.preventDefault();
+                        suggestions[currentIndex].click();
+                    } else if (e.key === 'Escape') {
+                        suggestionsDiv.style.display = 'none';
+                    }
+                });
+            }
+            
+            // For edit booking modal
+            const editEmailInput = document.getElementById('edit_notification_emails');
+            const editSuggestionsDiv = document.getElementById('editEmailSuggestions');
+            
+            if (editEmailInput && editSuggestionsDiv) {
+                // Show suggestions on focus
+                editEmailInput.addEventListener('focus', function() {
+                    if (this.value.trim()) {
+                        showEmailSuggestions(this, editSuggestionsDiv, true);
+                    }
+                });
+                
+                // Show suggestions on input
+                editEmailInput.addEventListener('input', function() {
+                    showEmailSuggestions(this, editSuggestionsDiv, true);
+                });
+                
+                // Handle arrow keys for navigation
+                editEmailInput.addEventListener('keydown', function(e) {
+                    const suggestions = editSuggestionsDiv.querySelectorAll('.suggestion-item');
+                    if (!suggestions.length || editSuggestionsDiv.style.display === 'none') return;
+                    
+                    let currentIndex = -1;
+                    suggestions.forEach((item, index) => {
+                        if (item.classList.contains('suggestion-selected')) {
+                            currentIndex = index;
+                        }
+                    });
+                    
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const nextIndex = (currentIndex + 1) % suggestions.length;
+                        selectSuggestionWithKeyboard(suggestions, nextIndex, true);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        const prevIndex = currentIndex <= 0 ? suggestions.length - 1 : currentIndex - 1;
+                        selectSuggestionWithKeyboard(suggestions, prevIndex, true);
+                    } else if (e.key === 'Enter' && currentIndex >= 0) {
+                        e.preventDefault();
+                        suggestions[currentIndex].click();
+                    } else if (e.key === 'Escape') {
+                        editSuggestionsDiv.style.display = 'none';
+                    }
+                });
+            }
+            
+            // Hide suggestions when clicking outside
+            document.addEventListener('click', function(event) {
+                const isEmailInput = emailInput?.contains(event.target);
+                const isSuggestions = suggestionsDiv?.contains(event.target);
+                const isEditEmailInput = editEmailInput?.contains(event.target);
+                const isEditSuggestions = editSuggestionsDiv?.contains(event.target);
+                
+                if (!isEmailInput && !isSuggestions && suggestionsDiv) {
+                    suggestionsDiv.style.display = 'none';
+                }
+                
+                if (!isEditEmailInput && !isEditSuggestions && editSuggestionsDiv) {
+                    editSuggestionsDiv.style.display = 'none';
+                }
+            });
+        }
+
+        // Select suggestion with keyboard navigation
+        function selectSuggestionWithKeyboard(suggestions, index, isEdit) {
+            suggestions.forEach(item => item.classList.remove('suggestion-selected'));
+            suggestions[index].classList.add('suggestion-selected');
+            
+            // Scroll into view if needed
+            suggestions[index].scrollIntoView({ 
+                block: 'nearest',
+                behavior: 'smooth'
+            });
         }
         
         // Select a specific time slot from the grid
@@ -2070,6 +2841,7 @@ header {
             document.getElementById('bookingModal').style.display = 'none';
             document.getElementById('bookingForm').reset();
             document.getElementById('externalFields').style.display = 'none';
+            document.getElementById('emailSuggestions').style.display = 'none';
             // Reset event type to Internal
             document.querySelector('select[name="event_type"]').value = 'I';
             // Reset submit button
@@ -2077,6 +2849,16 @@ header {
             submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Booking';
             submitBtn.disabled = false;
             submitBtn.style.background = 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)';
+        }
+
+        // Close edit modal
+        function closeEditModal() {
+            document.getElementById('editBookingModal').style.display = 'none';
+            document.getElementById('editBookingForm').reset();
+            document.getElementById('editExternalFields').style.display = 'none';
+            document.getElementById('editEmailSuggestions').style.display = 'none';
+            document.getElementById('edit_event_type').value = 'I';
+            toggleEditExternalFields();
         }
         
         // Toggle external fields based on event type
@@ -2224,6 +3006,306 @@ header {
             return true;
         });
         
+        // Show login alert
+        function showLoginAlert() {
+            document.getElementById('loginModal').style.display = 'flex';
+        }
+        
+        // Close login modal
+        function closeLoginModal() {
+            document.getElementById('loginModal').style.display = 'none';
+        }
+        
+        // Show booking details
+        function showBookingDetails(booking) {
+            currentBookingDetails = booking;
+            
+            // Format dates
+            const startDate = new Date(booking.start_time * 1000);
+            const endDate = new Date(booking.end_time * 1000);
+            const createdDate = new Date(booking.created_at * 1000);
+            
+            // Calculate duration
+            const durationMs = endDate - startDate;
+            const durationHours = durationMs / (1000 * 60 * 60);
+            const durationMinutes = (durationMs % (1000 * 60 * 60)) / (1000 * 60);
+            
+            let durationText = '';
+            if (durationHours >= 1) {
+                durationText += `${Math.floor(durationHours)}h `;
+            }
+            if (durationMinutes > 0) {
+                durationText += `${durationMinutes}m`;
+            }
+            
+            // Set booking details
+            document.getElementById('detailEventName').textContent = booking.name || 'N/A';
+            document.getElementById('detailBookedBy').textContent = booking.create_by || 'Unknown';
+            document.getElementById('detailEventType').textContent = booking.type === 'I' ? 'Internal Meeting' : 'External Event';
+            document.getElementById('detailRoomName').textContent = '<?php echo htmlspecialchars($room_name); ?>';
+            document.getElementById('detailDate').textContent = startDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            document.getElementById('detailTime').textContent = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) + ' - ' + endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            document.getElementById('detailDuration').textContent = durationText;
+            document.getElementById('detailCreated').textContent = createdDate.toLocaleString('en-US');
+            document.getElementById('detailDescription').textContent = booking.description || 'No description provided.';
+            
+            // Set status badge
+            const statusBadge = document.getElementById('bookingStatusBadge');
+            if (booking.status === 1) {
+                statusBadge.textContent = 'Tentative';
+                statusBadge.className = 'booking-status-badge tentative';
+            } else if (booking.status === 2) {
+                statusBadge.textContent = 'Cancelled';
+                statusBadge.className = 'booking-status-badge cancelled';
+            } else {
+                statusBadge.textContent = 'Confirmed';
+                statusBadge.className = 'booking-status-badge confirmed';
+            }
+            
+            // Set action buttons
+            const bookingActions = document.getElementById('bookingActions');
+            bookingActions.innerHTML = '';
+            
+            // Check if current user is the owner of this booking
+            const isOwner = <?php echo $is_logged_in ? 'true' : 'false'; ?> && 
+                           '<?php echo $current_user; ?>' === (booking.create_by || '');
+            
+            if (isOwner) {
+                bookingActions.innerHTML = `
+                    <button class="btn-edit" onclick="editBooking(${booking.id})">
+                        <i class="fas fa-edit"></i> Edit Booking
+                    </button>
+                    <button class="btn-delete" onclick="deleteBooking(${booking.id})">
+                        <i class="fas fa-trash"></i> Delete Booking
+                    </button>
+                `;
+            } else {
+                bookingActions.innerHTML = `
+                    <button class="btn-cancel" onclick="closeBookingDetailsModal()">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                `;
+            }
+            
+            // Show modal
+            document.getElementById('bookingDetailsModal').style.display = 'flex';
+        }
+        
+        // Close booking details modal
+        function closeBookingDetailsModal() {
+            document.getElementById('bookingDetailsModal').style.display = 'none';
+        }
+        
+        // Delete booking
+        function deleteBooking(bookingId) {
+            if (confirm('Are you sure you want to delete this booking?')) {
+                window.location.href = `delete_booking.php?id=${bookingId}&room=<?php echo $selected_room; ?>&date=<?php echo $selected_date; ?>`;
+            }
+        }
+        
+        // Edit booking
+        function editBooking(bookingId) {
+            // Close details modal first
+            closeBookingDetailsModal();
+            
+            // Fetch booking details and open edit modal
+            fetch(`get_booking.php?id=${bookingId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        const booking = data.booking;
+                        
+                        // Fill form fields
+                        document.getElementById('edit_booking_id').value = booking.id;
+                        document.getElementById('edit_event_name').value = booking.name || '';
+                        
+                        // Handle description split (brief and full)
+                        const description = booking.description || '';
+                        // Split by double newlines to separate brief and full description
+                        const parts = description.split('\n\n');
+                        const briefDesc = parts[0] || '';
+                        const fullDesc = parts.slice(1).join('\n\n') || '';
+                        
+                        document.getElementById('edit_brief_desc').value = briefDesc;
+                        document.getElementById('edit_full_desc').value = fullDesc;
+                        
+                        // Set event type
+                        const eventType = booking.type || 'I';
+                        document.getElementById('edit_event_type').value = eventType;
+                        toggleEditExternalFields();
+                        
+                        // Set dates and times
+                        const startDate = new Date(booking.start_time * 1000);
+                        const endDate = new Date(booking.end_time * 1000);
+                        
+                        document.getElementById('edit_start_date').value = startDate.toISOString().split('T')[0];
+                        document.getElementById('edit_start_time_input').value = 
+                            startDate.getHours().toString().padStart(2, '0') + ':' + 
+                            startDate.getMinutes().toString().padStart(2, '0');
+                        
+                        document.getElementById('edit_end_date').value = endDate.toISOString().split('T')[0];
+                        document.getElementById('edit_end_time_input').value = 
+                            endDate.getHours().toString().padStart(2, '0') + ':' + 
+                            endDate.getMinutes().toString().padStart(2, '0');
+                        
+                        // Set hidden timestamp fields
+                        document.getElementById('edit_start_time').value = booking.start_time;
+                        document.getElementById('edit_end_time').value = booking.end_time;
+                        
+                        // Set status
+                        if (booking.status === 1) {
+                            document.getElementById('edit_confirmation_tentative').checked = true;
+                        } else {
+                            document.getElementById('edit_confirmation_confirmed').checked = true;
+                        }
+                        
+                        // Update slot info display
+                        const roomName = '<?php echo addslashes($room_name); ?>';
+                        const areaName = '<?php echo addslashes($area_name); ?>';
+                        const startTime = document.getElementById('edit_start_time_input').value;
+                        const endTime = document.getElementById('edit_end_time_input').value;
+                        
+                        document.getElementById('editSlotDetails').innerHTML = `
+                            <i class="fas fa-door-open"></i> ${roomName}<br>
+                            <i class="fas fa-building"></i> ${areaName}<br>
+                            <i class="fas fa-calendar-day"></i> ${startDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}<br>
+                            <i class="fas fa-clock"></i> ${startTime} - ${endTime}
+                        `;
+                        
+                        // Calculate and display duration
+                        calculateEditDuration();
+                        
+                        // Check for conflicts
+                        checkEditConflicts();
+                        
+                        // Show the edit modal
+                        document.getElementById('editBookingModal').style.display = 'flex';
+                        
+                    } else {
+                        alert('Error loading booking details: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading booking details');
+                });
+        }
+
+        // Add the missing functions
+        function toggleEditExternalFields() {
+            const eventType = document.getElementById('edit_event_type').value;
+            const externalFields = document.getElementById('editExternalFields');
+            const representativeInput = document.getElementById('edit_representative');
+            
+            if (eventType === 'E') {
+                externalFields.style.display = 'block';
+                if (representativeInput) representativeInput.required = true;
+            } else {
+                externalFields.style.display = 'none';
+                if (representativeInput) representativeInput.required = false;
+            }
+        }
+
+        function calculateEditDuration() {
+            const startDate = document.getElementById('edit_start_date').value;
+            const startTime = document.getElementById('edit_start_time_input').value;
+            const endDate = document.getElementById('edit_end_date').value;
+            const endTime = document.getElementById('edit_end_time_input').value;
+            
+            if (startDate && startTime && endDate && endTime) {
+                const startDateTimeLocal = new Date(startDate + 'T' + startTime);
+                const endDateTimeLocal = new Date(endDate + 'T' + endTime);
+                
+                // Update hidden timestamp fields
+                const startTimestamp = Math.floor(startDateTimeLocal.getTime() / 1000);
+                const endTimestamp = Math.floor(endDateTimeLocal.getTime() / 1000);
+                
+                document.getElementById('edit_start_time').value = startTimestamp;
+                document.getElementById('edit_end_time').value = endTimestamp;
+                
+                if (endDateTimeLocal > startDateTimeLocal) {
+                    const diffMs = endDateTimeLocal - startDateTimeLocal;
+                    const diffHours = diffMs / (1000 * 60 * 60);
+                    const diffMinutes = (diffMs % (1000 * 60 * 60)) / (1000 * 60);
+                    
+                    let durationText = 'Duration: ';
+                    if (diffHours >= 1) {
+                        durationText += `${diffHours.toFixed(2)} hours`;
+                    } else {
+                        durationText += `${diffMinutes} minutes`;
+                    }
+                    
+                    document.getElementById('editDurationText').textContent = durationText;
+                } else {
+                    document.getElementById('editDurationText').textContent = 'Duration: Invalid (end before start)';
+                }
+                
+                // Check for conflicts after time change
+                setTimeout(checkEditConflicts, 500);
+            }
+        }
+
+        async function checkEditConflicts() {
+            const roomId = document.getElementById('edit_room_id').value;
+            const bookingId = document.getElementById('edit_booking_id').value;
+            const startTimestamp = document.getElementById('edit_start_time').value;
+            const endTimestamp = document.getElementById('edit_end_time').value;
+            
+            if (!roomId || !startTimestamp || !endTimestamp || isCheckingConflicts) {
+                return;
+            }
+            
+            isCheckingConflicts = true;
+            
+            try {
+                const response = await fetch('check_conflict.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `room_id=${roomId}&start_time=${startTimestamp}&end_time=${endTimestamp}&booking_id=${bookingId}`
+                });
+                
+                const data = await response.json();
+                
+                const conflictWarning = document.getElementById('editConflictWarning');
+                const conflictMessage = document.getElementById('editConflictMessage');
+                const submitBtn = document.getElementById('editSubmitBookingBtn');
+                
+                if (data.hasConflicts) {
+                    let message = 'Time slot conflicts with existing bookings. ';
+                    
+                    if (data.canAdjust) {
+                        message += 'System will automatically adjust times by 2 minutes to avoid conflicts.';
+                        submitBtn.innerHTML = '<i class="fas fa-clock"></i> Update with Time Adjustment';
+                        submitBtn.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                    } else {
+                        message += 'Please choose a different time.';
+                        submitBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Cannot Update (Conflict)';
+                        submitBtn.disabled = true;
+                        submitBtn.style.background = '#ef4444';
+                    }
+                    
+                    conflictMessage.innerHTML = message;
+                    conflictWarning.style.display = 'block';
+                } else {
+                    conflictWarning.style.display = 'none';
+                    submitBtn.innerHTML = '<i class="fas fa-save"></i> Update Booking';
+                    submitBtn.disabled = false;
+                    submitBtn.style.background = 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)';
+                }
+            } catch (error) {
+                console.error('Error checking conflicts:', error);
+            } finally {
+                isCheckingConflicts = false;
+            }
+        }
+        
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             // Set min date for date pickers
@@ -2250,6 +3332,12 @@ header {
                 }
             });
             
+            // Load user data for autocomplete
+            loadUserData();
+            
+            // Initialize autocomplete for both modals
+            initAutocomplete();
+            
             // Auto-close notifications after 8 seconds
             setTimeout(() => {
                 const notifications = document.querySelectorAll('.notification');
@@ -2266,6 +3354,7 @@ header {
             if (e.key === 'Escape') {
                 closeModal();
                 closeLoginModal();
+                closeBookingDetailsModal();
             }
         });
     </script>

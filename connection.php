@@ -235,13 +235,14 @@ function check_booking_conflict_with_buffer($room_id, $start_time, $end_time, $b
 }
 
 // Adjust booking times to avoid conflicts with buffer
-function adjust_booking_times($room_id, $start_time, $end_time, $buffer_minutes = 2) {
+// Adjust booking times to avoid conflicts with buffer
+function adjust_booking_times($room_id, $start_time, $end_time, $buffer_minutes = 2, $booking_id = null) {
     $adjusted_start = $start_time;
     $adjusted_end = $end_time;
     $adjustments = [];
     
     // Get conflicts with current times
-    $conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $end_time);
+    $conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $end_time, $booking_id);
     
     if (!empty($conflicts)) {
         // Sort conflicts by start time
@@ -258,7 +259,7 @@ function adjust_booking_times($room_id, $start_time, $end_time, $buffer_minutes 
                 // Make sure new end time is after start time
                 if ($new_end_time > $start_time) {
                     // Check if new end time would conflict with other bookings
-                    $new_conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $new_end_time);
+                    $new_conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $new_end_time, $booking_id);
                     if (empty($new_conflicts)) {
                         $adjusted_end = $new_end_time;
                         $adjustments[] = [
@@ -285,7 +286,7 @@ function adjust_booking_times($room_id, $start_time, $end_time, $buffer_minutes 
                     // Make sure new start time is before end time
                     if ($new_start_time < $end_time) {
                         // Check if new start time would conflict with other bookings
-                        $new_conflicts = check_booking_conflict_with_buffer($room_id, $new_start_time, $end_time);
+                        $new_conflicts = check_booking_conflict_with_buffer($room_id, $new_start_time, $end_time, $booking_id);
                         if (empty($new_conflicts)) {
                             $adjusted_start = $new_start_time;
                             $adjustments[] = [
@@ -384,7 +385,7 @@ function create_booking($data) {
     $start_time = $time_adjustment['adjusted_start'];
     $end_time = $time_adjustment['adjusted_end'];
     $adjustments = $time_adjustment['adjustments'];
-    
+    $ical_uid = generate_ical_uid();
     // Start transaction
     $mysqli->begin_transaction();
     
@@ -393,15 +394,16 @@ function create_booking($data) {
         $stmt = $mysqli->prepare("
             INSERT INTO mrbs_entry (
                 start_time, end_time, entry_type, room_id, 
-                create_by, name, type, description, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                create_by, name, type, description, status,
+                ical_uid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         
         $entry_type = 0; // Single event
         $status = isset($data['status']) ? $data['status'] : 0; // 0 = confirmed, 1 = tentative
         
         $stmt->bind_param(
-            "iiiissssi",
+            "iiiissssis",
             $start_time,
             $end_time,
             $entry_type,
@@ -410,7 +412,8 @@ function create_booking($data) {
             $data['event_name'],
             $data['event_type'],
             $data['description'],
-            $status
+            $status,
+            $ical_uid 
         );
         
         if (!$stmt->execute()) {
@@ -561,6 +564,25 @@ function get_area_name($area_id) {
     return $area_name ? $area_name : 'Unknown Area';
 }
 
+function get_area_name_by_room($room_id) {
+    global $mysqli;
+    
+    $stmt = $mysqli->prepare("
+        SELECT a.area_name 
+        FROM mrbs_area a
+        JOIN mrbs_room r ON a.id = r.area_id
+        WHERE r.id = ?
+    ");
+    
+    $stmt->bind_param("i", $room_id);
+    $stmt->execute();
+    $stmt->bind_result($area_name);
+    $stmt->fetch();
+    $stmt->close();
+    
+    return $area_name ? $area_name : '';
+}
+
 // Send booking confirmation email
 function send_booking_confirmation($booking_id, $recipient_email) {
     global $mysqli;
@@ -654,5 +676,244 @@ function send_booking_confirmation($booking_id, $recipient_email) {
     $stmt->close();
     
     return true;
+}
+
+function is_booking_owner($booking_creator) {
+    if (!is_logged_in()) {
+        return false;
+    }
+    
+    $current_user = get_current_username();
+    return trim($booking_creator) === trim($current_user);
+}
+
+// Get all users with email (for notification suggestions)
+function get_users_with_email() {
+    global $mysqli;
+    
+    $result = $mysqli->query("
+        SELECT name, display_name, email 
+        FROM mrbs_users 
+        WHERE email IS NOT NULL 
+        AND email != '' 
+        AND email LIKE '%@%'
+        ORDER BY display_name
+    ");
+    
+    $users = [];
+    while ($row = $result->fetch_assoc()) {
+        $users[] = [
+            'username' => $row['name'],
+            'display_name' => $row['display_name'] ?: $row['name'],
+            'email' => $row['email']
+        ];
+    }
+    return $users;
+}
+
+// Get booking by ID for editing
+function get_booking_for_edit($booking_id) {
+    global $mysqli;
+    
+    $stmt = $mysqli->prepare("
+        SELECT 
+            e.id,
+            e.start_time,
+            e.end_time,
+            e.name,
+            e.create_by,
+            e.description,
+            e.type,
+            e.status,
+            e.room_id,
+            r.room_name,
+            a.area_name
+        FROM mrbs_entry e
+        LEFT JOIN mrbs_room r ON e.room_id = r.id
+        LEFT JOIN mrbs_area a ON r.area_id = a.id
+        WHERE e.id = ?
+    ");
+    
+    $stmt->bind_param("i", $booking_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $booking = $result->fetch_assoc();
+    $stmt->close();
+    
+    return $booking;
+}
+
+// Update booking
+function update_booking($booking_id, $data) {
+    global $mysqli;
+    
+    if (!is_logged_in()) {
+        return ['success' => false, 'message' => 'User not logged in'];
+    }
+    
+    $current_user = get_current_username();
+    
+    // Check if the user owns this booking
+    $stmt = $mysqli->prepare("SELECT create_by FROM mrbs_entry WHERE id = ?");
+    $stmt->bind_param("i", $booking_id);
+    $stmt->execute();
+    $stmt->bind_result($create_by);
+    $stmt->fetch();
+    $stmt->close();
+    
+    if ($create_by !== $current_user) {
+        return ['success' => false, 'message' => 'You can only edit your own bookings'];
+    }
+    
+    // Check for conflicts with buffer and adjust if necessary
+    $buffer_minutes = 2;
+    $time_adjustment = adjust_booking_times($data['room_id'], $data['start_time'], $data['end_time'], $buffer_minutes, $booking_id);
+    
+    // If there are conflicts and times couldn't be adjusted
+    if ($time_adjustment['has_conflicts'] && empty($time_adjustment['adjustments'])) {
+        $conflict_names = [];
+        foreach ($time_adjustment['conflicts'] as $conflict) {
+            $conflict_names[] = $conflict['name'] . ' (' . 
+                date('g:i A', $conflict['start_time']) . ' - ' . 
+                date('g:i A', $conflict['end_time']) . ')';
+        }
+        
+        return [
+            'success' => false, 
+            'message' => 'Time slot conflicts with existing bookings: ' . implode(', ', $conflict_names) . 
+                        '. Please choose a different time.'
+        ];
+    }
+    
+    // Use adjusted times if available
+    $start_time = $time_adjustment['adjusted_start'];
+    $end_time = $time_adjustment['adjusted_end'];
+    $adjustments = $time_adjustment['adjustments'];
+    
+    // Start transaction
+    $mysqli->begin_transaction();
+    
+    try {
+        // Update main booking
+        $stmt = $mysqli->prepare("
+            UPDATE mrbs_entry 
+            SET start_time = ?, 
+                end_time = ?, 
+                name = ?, 
+                type = ?, 
+                description = ?, 
+                status = ?,
+                modified_by = ?,
+                timestamp = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
+        
+        $status = isset($data['status']) ? $data['status'] : 0;
+        
+        // Count the parameters: 8 total (7 SET values + 1 WHERE condition)
+        $stmt->bind_param(
+            "iississi",  // Corrected: description is string, current_user is string
+            $start_time,           // int
+            $end_time,             // int
+            $data['event_name'],   // string
+            $data['event_type'],   // string
+            $data['description'],  // string (not int!)
+            $status,               // int
+            $current_user,         // string (not int!)
+            $booking_id            // int
+        );
+        
+        if (!$stmt->execute()) {
+            throw new Exception('Failed to update booking: ' . $mysqli->error);
+        }
+        $stmt->close();
+        
+        // Delete existing related data
+        $stmt2 = $mysqli->prepare("DELETE FROM mrbs_groups WHERE entry_id = ?");
+        $stmt2->bind_param("i", $booking_id);
+        $stmt2->execute();
+        $stmt2->close();
+        
+        $stmt3 = $mysqli->prepare("DELETE FROM mrbs_prepare WHERE entry_id = ?");
+        $stmt3->bind_param("i", $booking_id);
+        $stmt3->execute();
+        $stmt3->close();
+        
+        // For external events, save representative and preparations
+        if ($data['event_type'] === 'E' && !empty($data['representative_name'])) {
+            // Save representative
+            $stmt4 = $mysqli->prepare("
+                INSERT INTO mrbs_groups (entry_id, full_name, email) 
+                VALUES (?, ?, NULL)
+            ");
+            
+            $stmt4->bind_param("is", $booking_id, $data['representative_name']);
+            $stmt4->execute();
+            $stmt4->close();
+            
+            // Save preparations if provided
+            if (!empty($data['preparations'])) {
+                $stmt5 = $mysqli->prepare("
+                    INSERT INTO mrbs_prepare (entry_id, name) 
+                    VALUES (?, ?)
+                ");
+                
+                foreach ($data['preparations'] as $preparation) {
+                    $stmt5->bind_param("is", $booking_id, $preparation);
+                    $stmt5->execute();
+                }
+                $stmt5->close();
+            }
+        }
+        
+        // Save notification emails
+        if (!empty($data['notification_email'])) {
+            $emails = array_map('trim', explode(',', $data['notification_email']));
+            
+            $stmt6 = $mysqli->prepare("
+                INSERT INTO mrbs_groups (entry_id, full_name, email) 
+                VALUES (?, NULL, ?)
+            ");
+            
+            foreach ($emails as $email) {
+                if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $stmt6->bind_param("is", $booking_id, $email);
+                    $stmt6->execute();
+                }
+            }
+            $stmt6->close();
+        }
+        
+        // Commit transaction
+        $mysqli->commit();
+        
+        // Return success with adjustment info
+        return [
+            'success' => true, 
+            'booking_id' => $booking_id, 
+            'message' => 'Booking updated successfully',
+            'adjustments' => $adjustments,
+            'adjusted_times' => [
+                'start' => $start_time,
+                'end' => $end_time,
+                'original_start' => $data['start_time'],
+                'original_end' => $data['end_time']
+            ],
+            'has_adjustments' => !empty($adjustments)
+        ];
+        
+    } catch (Exception $e) {
+        $mysqli->rollback();
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+// Add this function to connection.php
+function generate_ical_uid() {
+    // Generate a unique iCal UID based on booking ID, room ID, and timestamp
+    $random1 = bin2hex(random_bytes(6)); // 12 characters like "693caef48edfd"
+    $random2 = bin2hex(random_bytes(4)); // 8 characters like "989a3e1d"
+    $domain = '172.16.81.215';
+    return "MRBS-" . $random1 . "-" . $random2 . "@" . $domain;
 }
 ?>

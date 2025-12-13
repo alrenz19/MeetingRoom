@@ -9,13 +9,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $room_id = (int)$_POST['room_id'];
     $start_time = (int)$_POST['start_time'];
     $end_time = (int)$_POST['end_time'];
+    $booking_id = isset($_POST['booking_id']) ? (int)$_POST['booking_id'] : null;
     
     // Check for conflicts
-    $conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $end_time);
+    $conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $end_time, $booking_id);
     
     if (!empty($conflicts)) {
         // Try to adjust times
-        $adjustment = adjust_booking_times($room_id, $start_time, $end_time);
+        $adjustment = adjust_booking_times($room_id, $start_time, $end_time, 2, $booking_id);
         
         echo json_encode([
             'hasConflicts' => true,
