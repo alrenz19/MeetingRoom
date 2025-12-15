@@ -3103,7 +3103,7 @@ header {
             }
         }
         
-        // Edit booking
+        // Edit booking - FIXED VERSION
         function editBooking(bookingId) {
             // Close details modal first
             closeBookingDetailsModal();
@@ -3119,6 +3119,8 @@ header {
                 .then(data => {
                     if (data.success) {
                         const booking = data.booking;
+                        
+                        console.log('Booking data for edit:', booking); // Debug log
                         
                         // Fill form fields
                         document.getElementById('edit_booking_id').value = booking.id;
@@ -3162,6 +3164,49 @@ header {
                             document.getElementById('edit_confirmation_tentative').checked = true;
                         } else {
                             document.getElementById('edit_confirmation_confirmed').checked = true;
+                        }
+                        
+                        // **FIXED: Use correct property name - notification_emails (plural)**
+                        if (booking.notification_emails) {
+                            document.getElementById('edit_notification_emails').value = booking.notification_emails;
+                            console.log('Setting notification emails:', booking.notification_emails);
+                        } else {
+                            document.getElementById('edit_notification_emails').value = '';
+                            console.log('No notification emails found');
+                        }
+                        
+                        // If this is an external event, populate external fields
+                        if (eventType === 'E') {
+                            // Check for representative
+                            if (booking.representative) {
+                                document.getElementById('edit_representative').value = booking.representative;
+                                console.log('Setting representative:', booking.representative);
+                            }
+                            
+                            // Try to extract preparations from description if not in separate field
+                            const prepMatch = description.match(/Preparations needed:\s*(.+)/);
+                            if (prepMatch && prepMatch[1]) {
+                                const preparations = prepMatch[1].split(',');
+                                preparations.forEach(prep => {
+                                    const trimmed = prep.trim().toLowerCase();
+                                    // Check checkboxes based on preparation
+                                    if (trimmed.includes('water')) {
+                                        document.getElementById('edit_needs_water').checked = true;
+                                    }
+                                    if (trimmed.includes('whiteboard')) {
+                                        document.getElementById('edit_needs_whiteboard').checked = true;
+                                    }
+                                    if (trimmed.includes('coffee')) {
+                                        document.getElementById('edit_needs_coffee').checked = true;
+                                    }
+                                    if (trimmed.includes('projector')) {
+                                        document.getElementById('edit_needs_projector').checked = true;
+                                    }
+                                    if (trimmed.includes('snacks')) {
+                                        document.getElementById('edit_needs_snacks').checked = true;
+                                    }
+                                });
+                            }
                         }
                         
                         // Update slot info display
@@ -3357,6 +3402,99 @@ header {
                 closeBookingDetailsModal();
             }
         });
+
+
+        document.getElementById('editBookingForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    console.log('Edit form submitted');
+    
+    // Basic validation
+    const eventName = document.getElementById('edit_event_name').value.trim();
+    const briefDesc = document.getElementById('edit_brief_desc').value.trim();
+    const startDate = document.getElementById('edit_start_date').value;
+    const startTime = document.getElementById('edit_start_time_input').value;
+    const endDate = document.getElementById('edit_end_date').value;
+    const endTime = document.getElementById('edit_end_time_input').value;
+    const eventType = document.getElementById('edit_event_type').value;
+    
+    console.log('Form values:', {
+        eventName, briefDesc, startDate, startTime, endDate, endTime, eventType
+    });
+    
+    if (!eventName) {
+        alert('Please enter an event name.');
+        return false;
+    }
+    
+    if (!briefDesc) {
+        alert('Please enter a brief description.');
+        return false;
+    }
+    
+    if (eventType === 'E') {
+        const representative = document.getElementById('edit_representative').value.trim();
+        if (!representative) {
+            alert('Representative name is required for external events.');
+            return false;
+        }
+        
+        // Check if at least one preparation is selected
+        const preparations = document.querySelectorAll('#editExternalFields input[type="checkbox"]:checked');
+        const otherPreparations = document.getElementById('edit_other_preparations').value.trim();
+        
+        if (preparations.length === 0 && !otherPreparations) {
+            alert('Please specify at least one preparation needed for external events.');
+            return false;
+        }
+    }
+    
+    // Validate date/time
+    const start = new Date(startDate + 'T' + startTime);
+    const end = new Date(endDate + 'T' + endTime);
+    
+    if (end <= start) {
+        alert('End date/time must be after start date/time!');
+        return false;
+    }
+    
+    // Show confirmation if there are conflicts
+    const conflictWarning = document.getElementById('editConflictWarning');
+    if (conflictWarning.style.display === 'block') {
+        const confirmed = confirm(
+            'Warning: This time slot conflicts with existing bookings.\n\n' +
+            'The system will automatically adjust your booking times by 2 minutes to avoid conflicts.\n\n' +
+            'Do you want to proceed?'
+        );
+        
+        if (!confirmed) {
+            return false;
+        }
+    }
+    
+    // Calculate timestamps for hidden fields
+    const startDateTimeLocal = new Date(startDate + 'T' + startTime);
+    const endDateTimeLocal = new Date(endDate + 'T' + endTime);
+    
+    const startTimestamp = Math.floor(startDateTimeLocal.getTime() / 1000);
+    const endTimestamp = Math.floor(endDateTimeLocal.getTime() / 1000);
+    
+    // Set hidden timestamp fields
+    document.getElementById('edit_start_time').value = startTimestamp;
+    document.getElementById('edit_end_time').value = endTimestamp;
+    
+    console.log('Setting timestamps:', {
+        startTimestamp,
+        endTimestamp,
+        startFormatted: new Date(startTimestamp * 1000).toLocaleString(),
+        endFormatted: new Date(endTimestamp * 1000).toLocaleString()
+    });
+    
+    // Submit form
+    console.log('Submitting edit form...');
+    this.submit();
+    return true;
+});
     </script>
 </body>
 </html>
