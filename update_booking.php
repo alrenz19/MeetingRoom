@@ -151,12 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // Send email notifications to all provided emails
             if (!empty($notification_emails)) {
-                $emails = array_map('trim', explode(',', $notification_emails));
-                foreach ($emails as $email) {
-                    if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                        send_booking_confirmation($booking_id, $email);
-                    }
-                }
+                send_booking_notification($result['booking_id'], 'updated', $notification_emails);
             }
             
             // Redirect to dashboard with success message

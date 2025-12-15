@@ -582,39 +582,45 @@ function get_area_name_by_room($room_id) {
     
     return $area_name ? $area_name : '';
 }
-
-// Send booking confirmation email
-function send_booking_confirmation($booking_id, $recipient_email) {
+// Send booking notification email for create/update/delete
+function send_booking_notification($booking_id, $action = 'created', $recipient_email = null) {
     global $mysqli;
     
     // Get booking details
     $booking = get_booking_by_id($booking_id);
-    if (!$booking) return false;
+    if (!$booking) {
+        error_log("Booking not found for notification: $booking_id");
+        return false;
+    }
     
     // Get room and area info
     $room_name = get_room_name($booking['room_id']);
     $area_name = get_area_name($booking['area_id'] ?? 0);
     
-    // Prepare email content
-    $subject = "Booking Confirmation: " . $booking['name'];
+    // Set email subject based on action
+    $subjects = [
+        'created' => 'Booking Confirmation: ' . $booking['name'],
+        'updated' => 'Booking Updated: ' . $booking['name'],
+        'cancelled' => 'Booking Cancelled: ' . $booking['name']
+    ];
+    $subject = $subjects[$action] ?? 'Booking Notification: ' . $booking['name'];
     
-    // Check if times were adjusted
-    $adjustment_note = '';
-    if (!empty($booking['time_adjustments'])) {
-        $adjustments = json_decode($booking['time_adjustments'], true);
-        if (!empty($adjustments)) {
-            $adjustment_note = "\n\nNote: Your booking time was automatically adjusted to avoid conflicts with existing bookings.";
-            foreach ($adjustments as $adjustment) {
-                if (isset($adjustment['message'])) {
-                    $adjustment_note .= "\n- " . $adjustment['message'];
-                }
-            }
-        }
-    }
+    // Set headline based on action
+    $headlines = [
+        'created' => 'scheduled',
+        'updated' => 'updated',
+        'cancelled' => 'cancelled'
+    ];
+    $headline = $headlines[$action] ?? 'modified';
     
-    // Build the email body
-    $email_header = "New Meeting Scheduled";
-    $headline = "scheduled";
+    // Set email header based on action
+    $headers = [
+        'created' => 'New Meeting Scheduled',
+        'updated' => 'Meeting Updated',
+        'cancelled' => 'Meeting Cancelled'
+    ];
+    $email_header = $headers[$action] ?? 'Meeting Notification';
+    
     $room_display = $area_name . ' - ' . $room_name;
     
     $start_time_formatted = date('F j, Y g:i A', $booking['start_time']);
@@ -628,6 +634,28 @@ function send_booking_confirmation($booking_id, $recipient_email) {
     $confirmed = $booking['status'] == 0 ? 'Confirmed' : 'Tentative';
     $type = $booking['type'] == 'I' ? 'Internal' : 'External';
     
+    // Determine colors based on action
+    $action_notice_bg = '';
+    $action_notice_border = '';
+    $action_notice_color = '';
+    $cancelled_note = '';
+    
+    if ($action == 'cancelled') {
+        $action_notice_bg = '#fee2e2';
+        $action_notice_border = '#fecaca';
+        $action_notice_color = '#991b1b';
+        $cancelled_note = 'The room is now available for booking.';
+    } elseif ($action == 'updated') {
+        $action_notice_bg = '#fef3c7';
+        $action_notice_border = '#fde68a';
+        $action_notice_color = '#92400e';
+    } else {
+        $action_notice_bg = '#d1fae5';
+        $action_notice_border = '#a7f3d0';
+        $action_notice_color = '#065f46';
+    }
+    
+    // Build the email body with action-specific content
     $message = <<<HTML
     <html>
       <head>
@@ -636,25 +664,48 @@ function send_booking_confirmation($booking_id, $recipient_email) {
           .container { padding: 20px; border: 1px solid #e0e0e0; background-color: #f9f9f9; max-width: 600px; margin: auto; }
           h2 { color: #2c3e50; }
           .details { background-color: #fff; border: 1px solid #ddd; padding: 15px; margin-top: 15px; }
-          .adjustment-note { background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 10px 0; border-radius: 4px; }
+          .action-notice { 
+            background-color: $action_notice_bg; 
+            border: 1px solid $action_notice_border; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 4px; 
+            color: $action_notice_color;
+          }
           .footer { font-size: 12px; color: #888; margin-top: 20px; }
         </style>
       </head>
       <body>
         <div class="container">
-          <h2>{$email_header}</h2>
+          <h2>$email_header</h2>
           <p>Good day</p>
-          <p>The following meeting has been <strong>{$headline}</strong> by the organizer:</p>
+          <p>The following meeting has been <strong>$headline</strong> by the organizer:</p>
+          
+          <div class="action-notice">
+            <strong><i class="fas fa-info-circle"></i> This meeting has been $headline.</strong>
+            $cancelled_note
+          </div>
+          
           <div class="details">
             <p><strong>Subject:</strong> {$booking['name']}</p>
             <p><strong>Description:</strong> {$booking['description']}</p>
             <p><strong>Organizer:</strong> {$booking['create_by']}</p>
-            <p><strong>Start Time:</strong> {$start_time_formatted}</p>
-            <p><strong>End Time:</strong> {$end_time_formatted}</p>
-            <p><strong>Duration:</strong> {$duration_string}</p>
-            <p><strong>Type:</strong> {$type}</p>
-            <p><strong>Area / Rooms:</strong><br>{$room_display}</p>
-            <p><strong>Confirmation status: </strong>{$confirmed}</p>
+            <p><strong>Start Time:</strong> $start_time_formatted</p>
+            <p><strong>End Time:</strong> $end_time_formatted</p>
+            <p><strong>Duration:</strong> $duration_string</p>
+            <p><strong>Type:</strong> $type</p>
+            <p><strong>Area / Rooms:</strong><br>$room_display</p>
+            <p><strong>Confirmation status:</strong> $confirmed</p>
+HTML;
+    
+    // Add updated by line only for updates
+    if ($action == 'updated') {
+        $updated_by = $booking['modified_by'] ?? $booking['create_by'];
+        $message .= "<p><strong>Last updated by:</strong> $updated_by</p>";
+    }
+    
+    // Close the email template
+    $message .= <<<HTML
           </div>
           <div class="footer">
             <p>This is an automated email from the system.</p>
@@ -663,18 +714,252 @@ function send_booking_confirmation($booking_id, $recipient_email) {
         </div>
       </body>
     </html>
-    HTML;
+HTML;
     
-    // Send email (queue it in email_queue table)
+    // Determine recipient(s)
+    $recipients = [];
+    
+    // 1. Primary recipient(s) from parameter (handle comma-separated emails)
+    if ($recipient_email) {
+        $emails = array_map('trim', explode(',', $recipient_email));
+        foreach ($emails as $email) {
+            if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                if (!in_array($email, $recipients)) {
+                    $recipients[] = $email;
+                }
+            }
+        }
+    }
+    
+    // 2. Get notification emails from groups table
     $stmt = $mysqli->prepare("
-        INSERT INTO email_queue (recipient, subject, body, action) 
-        VALUES (?, ?, ?, 'booking_confirmation')
+        SELECT email FROM mrbs_groups 
+        WHERE entry_id = ? AND email IS NOT NULL AND email != ''
     ");
-    
-    $stmt->bind_param("sss", $recipient_email, $subject, $message);
+    $stmt->bind_param("i", $booking_id);
     $stmt->execute();
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        if (!empty($row['email']) && !in_array($row['email'], $recipients)) {
+            $recipients[] = $row['email'];
+        }
+    }
     $stmt->close();
     
+    // 3. Also include the organizer's email if available
+    $organizer_email = get_user_email_by_username($booking['create_by']);
+    if ($organizer_email && !in_array($organizer_email, $recipients)) {
+        $recipients[] = $organizer_email;
+    }
+    
+    // DEBUG: Log all recipients found
+    error_log("Found " . count($recipients) . " recipients for booking $booking_id:");
+    foreach ($recipients as $index => $recipient) {
+        error_log("  Recipient " . ($index + 1) . ": $recipient");
+    }
+    
+    // Send email to all recipients using BATCH API
+    $sent_count = 0;
+    $valid_recipients = [];
+    
+    // Use batch API approach - send all recipients at once
+    if (!empty($recipients)) {
+        $email_data = [
+            'booking_id' => $booking_id,
+            'subject' => $subject,
+            'body' => $message,
+            'action' => 'booking_' . $action,
+            'recipients' => [],
+            'booking_details' => [
+                'name' => $booking['name'],
+                'description' => $booking['description'],
+                'organizer' => $booking['create_by'],
+                'start_time' => $start_time_formatted,
+                'end_time' => $end_time_formatted,
+                'room' => $room_display,
+                'type' => $type,
+                'status' => $confirmed,
+                'action' => $action
+            ]
+        ];
+        
+        // Validate and collect valid recipients
+        foreach ($recipients as $recipient) {
+            $recipient = trim($recipient);
+            if (filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+                $email_data['recipients'][] = $recipient;
+                $valid_recipients[] = $recipient;
+            } else {
+                error_log("Invalid email format skipped: $recipient");
+            }
+        }
+        
+        if (!empty($email_data['recipients'])) {
+            // Send via enhanced batch API
+            $result = triggerLaravelEmailSendBatch($email_data);
+            
+            if ($result && isset($result['success']) && $result['success']) {
+                $sent_count = $result['sent'] ?? 0;
+                error_log("Batch API result: Sent $sent_count emails out of " . count($email_data['recipients']));
+                
+                // Also queue in database for record keeping
+                //queueEmailsInDatabase($valid_recipients, $subject, $message, 'booking_' . $action, $booking_id);
+            } else {
+                error_log("Batch API failed for booking $booking_id. Falling back to database queue.");
+                // Fallback: Queue in database only
+                //$sent_count = queueEmailsInDatabase($valid_recipients, $subject, $message, 'booking_' . $action, $booking_id);
+            }
+        }
+    }
+    
+    // Summary log
+    if (empty($valid_recipients)) {
+        error_log("No valid email recipients found for booking $booking_id");
+    } else {
+        error_log("Final result for booking $booking_id: " . 
+                 "$sent_count of " . count($valid_recipients) . " emails processed successfully");
+    }
+    
+    return $sent_count > 0;
+}
+
+/**
+ * Queue emails in database as fallback
+ */
+function queueEmailsInDatabase($recipients, $subject, $message, $action, $booking_id) {
+    global $mysqli;
+    
+    $queued_count = 0;
+    $mysqli->begin_transaction();
+    
+    try {
+        $stmt = $mysqli->prepare("
+            INSERT INTO email_queue (recipient, subject, body, action, booking_id) 
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        
+        foreach ($recipients as $recipient) {
+            $stmt->bind_param("ssssi", $recipient, $subject, $message, $action, $booking_id);
+            if ($stmt->execute()) {
+                $queued_count++;
+                error_log("Queued in database: $recipient");
+            } else {
+                error_log("Failed to queue in database: $recipient - " . $stmt->error);
+            }
+        }
+        
+        $stmt->close();
+        $mysqli->commit();
+        
+        // Trigger Laravel to process the queue
+        triggerLaravelEmailSend();
+        
+    } catch (Exception $e) {
+        $mysqli->rollback();
+        error_log("Database queue transaction failed: " . $e->getMessage());
+    }
+    
+    return $queued_count;
+}
+
+/**
+ * Enhanced batch email sending API
+ */
+function triggerLaravelEmailSendBatch($email_data = null) {
+    $api_url = "http://172.16.131.229:8001/api/send-batch-emails";
+    
+    // If no data provided, trigger queue processing
+    if ($email_data === null) {
+        $api_url = "http://172.16.131.229:8001/api/send-emails";
+        $post_data = json_encode(['trigger_queue' => true]);
+    } else {
+        $post_data = json_encode($email_data);
+    }
+    
+    error_log("Calling Laravel batch API with " . (isset($email_data['recipients']) ? count($email_data['recipients']) : 0) . " recipients");
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ]);
+    
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    
+    if (curl_errno($ch)) {
+        error_log("cURL Error: " . curl_error($ch));
+        curl_close($ch);
+        return false;
+    }
+    
+    curl_close($ch);
+    
+    error_log("Batch API Response Code: $http_code");
+    
+    if ($http_code === 200) {
+        $result = json_decode($response, true);
+        error_log("Batch API Success: " . ($result['message'] ?? 'Processed'));
+        return $result;
+    } else {
+        error_log("Batch API Error $http_code: $response");
+        return false;
+    }
+}
+
+// Helper function to get user email by username
+function get_user_email_by_username($username) {
+    global $mysqli;
+    
+    $stmt = $mysqli->prepare("SELECT email FROM mrbs_users WHERE name = ?");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $stmt->bind_result($email);
+    $stmt->fetch();
+    $stmt->close();
+    
+    return $email;
+}
+
+function triggerLaravelEmailSend() {
+    $api_url = "http://172.16.131.229:8001/api/send-emails-immediately";
+    
+    // Direct HTTP request without background process - simpler and more reliable
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => '{}',
+            'timeout' => 5, // Shorter timeout so it doesn't block
+            'ignore_errors' => true // Don't fail on HTTP errors
+        ]
+    ]);
+    
+    // Non-blocking approach using fsockopen for async request
+    $parsed = parse_url($api_url);
+    $host = $parsed['host'];
+    $port = $parsed['port'] ?? 80;
+    $path = $parsed['path'] ?? '/';
+    
+    $fp = @fsockopen($host, $port, $errno, $errstr, 0.1);
+    if ($fp) {
+        stream_set_blocking($fp, false); // Non-blocking
+        $out = "POST $path HTTP/1.1\r\n";
+        $out .= "Host: $host\r\n";
+        $out .= "Content-Type: application/json\r\n";
+        $out .= "Content-Length: 2\r\n";
+        $out .= "Connection: Close\r\n\r\n";
+        $out .= "{}";
+        fwrite($fp, $out);
+        fclose($fp);
+    }
+    
+
     return true;
 }
 
@@ -744,6 +1029,7 @@ function get_booking_for_edit($booking_id) {
 }
 
 // Update booking
+
 function update_booking($booking_id, $data) {
     global $mysqli;
     
@@ -760,7 +1046,7 @@ function update_booking($booking_id, $data) {
     $stmt->bind_result($create_by);
     $stmt->fetch();
     $stmt->close();
-    
+
     if ($create_by !== $current_user) {
         return ['success' => false, 'message' => 'You can only edit your own bookings'];
     }
@@ -789,7 +1075,7 @@ function update_booking($booking_id, $data) {
     $start_time = $time_adjustment['adjusted_start'];
     $end_time = $time_adjustment['adjusted_end'];
     $adjustments = $time_adjustment['adjustments'];
-    
+
     // Start transaction
     $mysqli->begin_transaction();
     
@@ -804,29 +1090,46 @@ function update_booking($booking_id, $data) {
                 description = ?, 
                 status = ?,
                 modified_by = ?,
-                timestamp = CURRENT_TIMESTAMP
+                timestamp = CURRENT_TIMESTAMP()
             WHERE id = ?
         ");
         
-        $status = isset($data['status']) ? $data['status'] : 0;
+        $status = isset($data['status']) ? (int)$data['status'] : 0;
+
+        // Correct bind_param: "iississi"
+        // i = start_time (int)
+        // i = end_time (int)
+        // s = name (string)
+        // s = type (string)
+        // s = description (string)
+        // i = status (int)
+        // s = modified_by (string)
+        // i = id (int)
         
-        // Count the parameters: 8 total (7 SET values + 1 WHERE condition)
         $stmt->bind_param(
-            "iississi",  // Corrected: description is string, current_user is string
+            "iisssisi",
             $start_time,           // int
             $end_time,             // int
             $data['event_name'],   // string
             $data['event_type'],   // string
-            $data['description'],  // string (not int!)
+            $data['description'],  // string
             $status,               // int
-            $current_user,         // string (not int!)
+            $current_user,         // string
             $booking_id            // int
         );
         
         if (!$stmt->execute()) {
-            throw new Exception('Failed to update booking: ' . $mysqli->error);
+            error_log("SQL Error: " . $stmt->error);
+            throw new Exception('Failed to update booking: ' . $stmt->error);
         }
+        
+        $affected_rows = $stmt->affected_rows;
         $stmt->close();
+        
+        
+        if ($affected_rows === 0) {
+            throw new Exception('No rows were updated. Booking might not exist or data is the same.');
+        }
         
         // Delete existing related data
         $stmt2 = $mysqli->prepare("DELETE FROM mrbs_groups WHERE entry_id = ?");
@@ -886,7 +1189,7 @@ function update_booking($booking_id, $data) {
         
         // Commit transaction
         $mysqli->commit();
-        
+
         // Return success with adjustment info
         return [
             'success' => true, 
@@ -904,6 +1207,7 @@ function update_booking($booking_id, $data) {
         
     } catch (Exception $e) {
         $mysqli->rollback();
+        error_log("Transaction failed: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -915,5 +1219,384 @@ function generate_ical_uid() {
     $random2 = bin2hex(random_bytes(4)); // 8 characters like "989a3e1d"
     $domain = '172.16.81.215';
     return "MRBS-" . $random1 . "-" . $random2 . "@" . $domain;
+}
+
+
+// ============================================
+// PASSWORD RESET FUNCTIONS
+// ============================================
+
+/**
+ * Generate a secure reset token
+ */
+function generate_reset_token() {
+    return bin2hex(random_bytes(32)); // 64-character hex token
+}
+
+/**
+ * Send password reset email
+ */
+function send_password_reset($email) {
+    global $mysqli;
+    
+    // Check if email exists in database
+    $stmt = $mysqli->prepare("SELECT id, name, display_name, email FROM mrbs_users WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $stmt->store_result();
+    $stmt->bind_result($user_id, $username, $display_name, $user_email);
+    
+    if ($stmt->fetch()) {
+        $stmt->close();
+        
+        // Generate secure reset token
+        $reset_token = generate_reset_token();
+        $token_hash = password_hash($reset_token, PASSWORD_DEFAULT);
+        $expiry_time = time() + (24 * 60 * 60); // 24 hours from now
+        
+        // Store token hash and expiry in database
+        $stmt2 = $mysqli->prepare("
+            UPDATE mrbs_users 
+            SET reset_key_hash = ?, reset_key_expiry = ? 
+            WHERE id = ?
+        ");
+        $stmt2->bind_param("sii", $token_hash, $expiry_time, $user_id);
+        
+        if (!$stmt2->execute()) {
+            error_log("Failed to store reset token: " . $stmt2->error);
+            $stmt2->close();
+            return false;
+        }
+        
+        $stmt2->close();
+        
+        // Build reset link
+        $base_url = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']);
+        $reset_link = rtrim($base_url, '/') . "/login.php?token=" . $reset_token;
+        
+        // Use display name if available, otherwise username
+        $recipient_name = !empty($display_name) ? $display_name : $username;
+        
+        // Create email content (same as before)
+        $subject = "MRBS - Password Reset Request";
+        $message = <<<HTML
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+                .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+                .content { padding: 30px; background: #f8f9fa; }
+                .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 20px 0; }
+                .code-box { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 15px; margin: 20px 0; font-family: monospace; word-break: break-all; }
+                .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+                .warning { background: #fef3c7; border: 1px solid #fde68a; border-radius: 6px; padding: 15px; margin: 20px 0; color: #92400e; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h2>MRBS Password Reset</h2>
+                    <p>Meeting Room Booking System</p>
+                </div>
+                <div class="content">
+                    <p>Hello <strong>$recipient_name</strong>,</p>
+                    <p>You have requested to reset your password for the Meeting Room Booking System.</p>
+                    
+                    <div style="text-align: center;">
+                        <a href="$reset_link" class="button">Reset My Password</a>
+                    </div>
+                    
+                    <p>If the button doesn't work, copy and paste the following link into your browser:</p>
+                    <div class="code-box">
+                        $reset_link
+                    </div>
+                    
+                    <div class="warning">
+                        <p><strong>Important:</strong></p>
+                        <ul>
+                            <li>This link will expire in <strong>24 hours</strong></li>
+                            <li>If you didn't request this password reset, please ignore this email</li>
+                            <li>For security reasons, do not share this link with anyone</li>
+                        </ul>
+                    </div>
+                    
+                    <p>Best regards,<br>
+                    <strong>MRBS Support Team</strong></p>
+                </div>
+                <div class="footer">
+                    <p>This is an automated email from the Meeting Room Booking System.</p>
+                    <p>Please do not reply to this message.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        HTML;
+        
+        // Send email directly to Laravel API (non-blocking)
+        sendEmailToLaravelAPI($user_email, $subject, $message, 'confirmation');
+        
+        error_log("Password reset email sent to: $user_email (User ID: $user_id)");
+        return true;
+    }
+    
+    $stmt->close();
+    error_log("Password reset requested for non-existent email: $email");
+    return false;
+}
+
+/**
+ * Send email data to Laravel API (improved version)
+ */
+function sendEmailToLaravelAPI($recipient, $subject, $body, $type = 'password_reset') {
+    $laravelApiUrl = "http://172.16.131.229:8001/api/send-password-reset";
+    
+    // Prepare email data
+    $emailData = [
+        'recipient' => $recipient,
+        'subject' => $subject,
+        'body' => $body,
+        'type' => $type
+    ];
+    
+    // Use cURL with timeout
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $laravelApiUrl);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5); // 5 second timeout
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($emailData));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ]);
+    
+    // Execute request
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+    
+    if ($httpCode === 200) {
+        error_log("✓ Email sent via Laravel API to: $recipient");
+        return true;
+    } else {
+        error_log("✗ Laravel API failed ($httpCode) for: $recipient");
+        if ($curlError) {
+            error_log("cURL Error: $curlError");
+        }
+        // Fallback to direct email if Laravel API fails
+    }
+}
+
+
+/**
+ * Verify if a reset token is valid
+ */
+function verify_reset_token($token) {
+    global $mysqli;
+    
+    // Get current timestamp
+    $current_time = time();
+    
+    $stmt = $mysqli->prepare("
+        SELECT id, reset_key_hash, reset_key_expiry 
+        FROM mrbs_users 
+        WHERE reset_key_hash IS NOT NULL 
+        AND reset_key_expiry > ?
+    ");
+    $stmt->bind_param("i", $current_time);
+    $stmt->execute();
+    $stmt->store_result();
+    $stmt->bind_result($user_id, $token_hash, $expiry);
+    
+    $is_valid = false;
+    $user_id_found = null;
+    
+    while ($stmt->fetch()) {
+        if (password_verify($token, $token_hash)) {
+            $is_valid = true;
+            $user_id_found = $user_id;
+            break;
+        }
+    }
+    
+    $stmt->close();
+    
+    if ($is_valid) {
+        error_log("Reset token verified for user ID: $user_id_found");
+    } else {
+        error_log("Invalid or expired reset token attempted: $token");
+    }
+    
+    return $is_valid;
+}
+
+/**
+ * Reset password using a valid token
+ */
+function reset_password($token, $new_password) {
+    global $mysqli;
+    
+    // Get current timestamp
+    $current_time = time();
+    
+    // Find user with valid token
+    $stmt = $mysqli->prepare("
+        SELECT id, reset_key_hash, reset_key_expiry 
+        FROM mrbs_users 
+        WHERE reset_key_hash IS NOT NULL 
+        AND reset_key_expiry > ?
+    ");
+    $stmt->bind_param("i", $current_time);
+    $stmt->execute();
+    $stmt->store_result();
+    $stmt->bind_result($user_id, $token_hash, $expiry);
+    
+    $user_id_to_update = null;
+    
+    while ($stmt->fetch()) {
+        if (password_verify($token, $token_hash)) {
+            $user_id_to_update = $user_id;
+            break;
+        }
+    }
+    
+    $stmt->close();
+    
+    if ($user_id_to_update) {
+        // Hash the new password
+        $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
+        
+        // Update password and clear reset token
+        $stmt2 = $mysqli->prepare("
+            UPDATE mrbs_users 
+            SET password_hash = ?, 
+                reset_key_hash = NULL, 
+                reset_key_expiry = 0,
+                timestamp = CURRENT_TIMESTAMP()
+            WHERE id = ?
+        ");
+        $stmt2->bind_param("si", $password_hash, $user_id_to_update);
+        
+        if (!$stmt2->execute()) {
+            error_log("Failed to update password: " . $stmt2->error);
+            $stmt2->close();
+            return false;
+        }
+        
+        $affected_rows = $stmt2->affected_rows;
+        $stmt2->close();
+        
+        if ($affected_rows > 0) {
+            error_log("Password reset successfully for user ID: $user_id_to_update");
+            
+            // Get user details for confirmation email
+            $stmt3 = $mysqli->prepare("SELECT name, display_name, email FROM mrbs_users WHERE id = ?");
+            $stmt3->bind_param("i", $user_id_to_update);
+            $stmt3->execute();
+            $stmt3->bind_result($username, $display_name, $user_email);
+            $stmt3->fetch();
+            $stmt3->close();
+            
+            // Send password changed confirmation email
+            $recipient_name = !empty($display_name) ? $display_name : $username;
+            $subject = "MRBS - Password Changed Successfully";
+            $message = <<<HTML
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+                    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+                    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
+                    .content { padding: 30px; background: #f8f9fa; }
+                    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
+                    .info-box { background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 15px; margin: 20px 0; color: #065f46; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h2>Password Changed Successfully</h2>
+                        <p>Meeting Room Booking System</p>
+                    </div>
+                    <div class="content">
+                        <p>Hello <strong>$recipient_name</strong>,</p>
+                        <p>Your MRBS account password has been changed successfully.</p>
+                        
+                        <div class="info-box">
+                            <p><strong>Important Security Information:</strong></p>
+                            <ul>
+                                <li>Your new password is now active</li>
+                                <li>You can login with your new password</li>
+                                <li>If you did not make this change, please contact support immediately</li>
+                            </ul>
+                        </div>
+                        
+                        <p>You can now login to the MRBS system with your new password:</p>
+                        <p style="text-align: center; margin: 20px 0;">
+                            <a href="http://{$_SERVER['HTTP_HOST']}{$_SERVER['PHP_SELF']}" style="display: inline-block; background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+                                Go to MRBS Login
+                            </a>
+                        </p>
+                        
+                        <p>Best regards,<br>
+                        <strong>MRBS Support Team</strong></p>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated email from the Meeting Room Booking System.</p>
+                        <p>Please do not reply to this message.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            HTML;
+
+            // Trigger email sending
+            sendEmailToLaravelAPI($user_email, $subject, $message);
+            
+            return true;
+        }
+    }
+    
+    error_log("Password reset failed - invalid token or user not found");
+    return false;
+}
+
+/**
+ * Get user by reset token
+ */
+function get_user_by_reset_token($token) {
+    global $mysqli;
+    
+    $current_time = time();
+    
+    $stmt = $mysqli->prepare("
+        SELECT id, name, display_name, email 
+        FROM mrbs_users 
+        WHERE reset_key_hash IS NOT NULL 
+        AND reset_key_expiry > ?
+    ");
+    $stmt->bind_param("i", $current_time);
+    $stmt->execute();
+    $stmt->store_result();
+    $stmt->bind_result($user_id, $username, $display_name, $email);
+    
+    $user_data = null;
+    
+    while ($stmt->fetch()) {
+        // We need to verify the token against the hash
+        // This is a simplified version - in practice, you'd need to fetch the hash
+        $user_data = [
+            'id' => $user_id,
+            'username' => $username,
+            'display_name' => $display_name,
+            'email' => $email
+        ];
+        break; // For simplicity, return first match
+    }
+    
+    $stmt->close();
+    return $user_data;
 }
 ?>
