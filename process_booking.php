@@ -25,9 +25,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $start_datetime = (int)$_POST['start_time'];
     $end_datetime = (int)$_POST['end_time'];
     
-    // Debug logging
-    error_log("Booking received - start_timestamp: {$start_datetime} (" . date('Y-m-d H:i:s', $start_datetime) . "), end_timestamp: {$end_datetime} (" . date('Y-m-d H:i:s', $end_datetime) . ")");
-    
     if ($end_datetime <= $start_datetime) {
         $error_message = "End time must be after start time.";
     }

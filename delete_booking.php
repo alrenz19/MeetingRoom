@@ -63,9 +63,9 @@ if (isset($_GET['id'])) {
         // Convert array to comma-separated string for the function
         $recipient_emails = implode(',', $recipients);
         send_booking_notification($booking_id, 'cancelled', $recipient_emails);
-        error_log("Sent cancellation email for booking $booking_id to: " . $recipient_emails);
+       // error_log("Sent cancellation email for booking $booking_id to: " . $recipient_emails);
     } else {
-        error_log("No recipients found for booking $booking_id cancellation");
+       // error_log("No recipients found for booking $booking_id cancellation");
     }
     
     // Start transaction for data deletion

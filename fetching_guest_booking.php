@@ -39,7 +39,7 @@ function createDatabaseConnection($host, $dbname, $username, $password) {
         ]);
         return $pdo;
     } catch (\PDOException $e) {
-        error_log("Database connection failed: " . $e->getMessage());
+       // error_log("Database connection failed: " . $e->getMessage());
         http_response_code(500);
         echo json_encode(['error' => 'Database connection failed']);
         exit;
@@ -52,7 +52,7 @@ function executeQuery($pdo, $sql) {
         $stmt = $pdo->query($sql);
         return $stmt->fetchAll();
     } catch (\PDOException $e) {
-        error_log("Query failed: " . $e->getMessage());
+        //error_log("Query failed: " . $e->getMessage());
         return [];
     }
 }

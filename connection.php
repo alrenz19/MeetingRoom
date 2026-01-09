@@ -121,6 +121,105 @@ function get_all_rooms() {
     return $rooms;
 }
 
+function get_room_info($room_id) {
+    global $conn;
+    
+    $room_id = (int)$room_id;
+    
+    $sql = "SELECT r.*, a.area_name 
+            FROM rooms r 
+            LEFT JOIN areas a ON r.area_id = a.id 
+            WHERE r.id = ?";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $room_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        return $result->fetch_assoc();
+    }
+    
+    return false;
+}
+
+/**
+ * Get room information as JSON response (for AJAX calls)
+ * @param int $room_id Room ID
+ */
+function get_room_info_json($room_id) {
+    $room_info = get_room_info($room_id);
+    
+    if ($room_info) {
+        echo json_encode([
+            'success' => true,
+            'room' => [
+                'room_name' => $room_info['room_name'],
+                'area_id' => $room_info['area_id'],
+                'area_name' => $room_info['area_name']
+            ]
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Room not found'
+        ]);
+    }
+}
+
+// Get area info by ID
+function get_area_info($area_id) {
+    global $mysqli;
+    
+    $stmt = $mysqli->prepare("SELECT id, area_name FROM mrbs_area WHERE id = ? AND disabled = 0");
+    $stmt->bind_param("i", $area_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $area = $result->fetch_assoc();
+    $stmt->close();
+    
+    return $area ?: ['area_name' => 'Unknown Area'];
+}
+
+// Get all rooms grouped by area
+function get_all_rooms_grouped_by_area() {
+    global $mysqli;
+    $result = $mysqli->query("
+        SELECT 
+            a.id as area_id,
+            a.area_name,
+            r.id as room_id,
+            r.room_name,
+            r.description,
+            r.sort_key as room_sort_key,
+            a.sort_key as area_sort_key
+        FROM mrbs_area a
+        JOIN mrbs_room r ON a.id = r.area_id
+        WHERE a.disabled = 0 AND r.disabled = 0
+        ORDER BY a.sort_key, r.sort_key
+    ");
+    
+    $rooms_grouped = [];
+    while ($row = $result->fetch_assoc()) {
+        $area_id = $row['area_id'];
+        if (!isset($rooms_grouped[$area_id])) {
+            $rooms_grouped[$area_id] = [
+                'area_id' => $area_id,
+                'area_name' => $row['area_name'],
+                'rooms' => []
+            ];
+        }
+        
+        $rooms_grouped[$area_id]['rooms'][] = [
+            'id' => $row['room_id'],
+            'room_name' => $row['room_name'],
+            'description' => $row['description']
+        ];
+    }
+    
+    return array_values($rooms_grouped);
+}
+
 // Get bookings for a specific date range and room
 function get_bookings_for_room($room_id, $start_date, $end_date) {
     global $mysqli;
@@ -139,8 +238,13 @@ function get_bookings_for_room($room_id, $start_date, $end_date) {
             e.description,
             e.type,
             e.status,
-            e.room_id
+            e.room_id,
+            e.timestamp,
+            u.display_name,
+            r.room_name
         FROM mrbs_entry e
+        LEFT JOIN mrbs_users u ON u.name = e.create_by
+        JOIN mrbs_room r ON r.id = e.room_id
         WHERE e.room_id = ?
         AND (
             (e.start_time >= ? AND e.start_time <= ?) OR
@@ -176,10 +280,11 @@ function get_booking_by_id($booking_id) {
     global $mysqli;
     
     $stmt = $mysqli->prepare("
-        SELECT e.*, r.room_name, a.area_name 
+        SELECT e.*, r.room_name, a.area_name, u.display_name 
         FROM mrbs_entry e
         LEFT JOIN mrbs_room r ON e.room_id = r.id
         LEFT JOIN mrbs_area a ON r.area_id = a.id
+        LEFT JOIN mrbs_users u ON u.name = e.create_by
         WHERE e.id = ?
     ");
     
@@ -589,13 +694,13 @@ function send_booking_notification($booking_id, $action = 'created', $recipient_
     // Get booking details
     $booking = get_booking_by_id($booking_id);
     if (!$booking) {
-        error_log("Booking not found for notification: $booking_id");
+
         return false;
     }
     
     // Get room and area info
     $room_name = get_room_name($booking['room_id']);
-    $area_name = get_area_name($booking['area_id'] ?? 0);
+    $area_name = get_area_name_by_room($booking['room_id'] ?? 0);
     
     // Set email subject based on action
     $subjects = [
@@ -689,7 +794,7 @@ function send_booking_notification($booking_id, $action = 'created', $recipient_
           <div class="details">
             <p><strong>Subject:</strong> {$booking['name']}</p>
             <p><strong>Description:</strong> {$booking['description']}</p>
-            <p><strong>Organizer:</strong> {$booking['create_by']}</p>
+            <p><strong>Organizer:</strong> {$booking['display_name']}</p>
             <p><strong>Start Time:</strong> $start_time_formatted</p>
             <p><strong>End Time:</strong> $end_time_formatted</p>
             <p><strong>Duration:</strong> $duration_string</p>
@@ -700,7 +805,7 @@ HTML;
     
     // Add updated by line only for updates
     if ($action == 'updated') {
-        $updated_by = $booking['modified_by'] ?? $booking['create_by'];
+        $updated_by = $booking['modified_by'] ?? $booking['display_name'];
         $message .= "<p><strong>Last updated by:</strong> $updated_by</p>";
     }
     
@@ -751,13 +856,7 @@ HTML;
     if ($organizer_email && !in_array($organizer_email, $recipients)) {
         $recipients[] = $organizer_email;
     }
-    
-    // DEBUG: Log all recipients found
-    error_log("Found " . count($recipients) . " recipients for booking $booking_id:");
-    foreach ($recipients as $index => $recipient) {
-        error_log("  Recipient " . ($index + 1) . ": $recipient");
-    }
-    
+      
     // Send email to all recipients using BATCH API
     $sent_count = 0;
     $valid_recipients = [];
@@ -773,7 +872,7 @@ HTML;
             'booking_details' => [
                 'name' => $booking['name'],
                 'description' => $booking['description'],
-                'organizer' => $booking['create_by'],
+                'organizer' => $booking['display_name'],
                 'start_time' => $start_time_formatted,
                 'end_time' => $end_time_formatted,
                 'room' => $room_display,
@@ -789,8 +888,6 @@ HTML;
             if (filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
                 $email_data['recipients'][] = $recipient;
                 $valid_recipients[] = $recipient;
-            } else {
-                error_log("Invalid email format skipped: $recipient");
             }
         }
         
@@ -800,12 +897,11 @@ HTML;
             
             if ($result && isset($result['success']) && $result['success']) {
                 $sent_count = $result['sent'] ?? 0;
-                error_log("Batch API result: Sent $sent_count emails out of " . count($email_data['recipients']));
-                
+        
                 // Also queue in database for record keeping
                 //queueEmailsInDatabase($valid_recipients, $subject, $message, 'booking_' . $action, $booking_id);
             } else {
-                error_log("Batch API failed for booking $booking_id. Falling back to database queue.");
+               // error_log("Batch API failed for booking $booking_id. Falling back to database queue.");
                 // Fallback: Queue in database only
                 //$sent_count = queueEmailsInDatabase($valid_recipients, $subject, $message, 'booking_' . $action, $booking_id);
             }
@@ -813,12 +909,12 @@ HTML;
     }
     
     // Summary log
-    if (empty($valid_recipients)) {
-        error_log("No valid email recipients found for booking $booking_id");
-    } else {
-        error_log("Final result for booking $booking_id: " . 
-                 "$sent_count of " . count($valid_recipients) . " emails processed successfully");
-    }
+    // if (empty($valid_recipients)) {
+    //     //error_log("No valid email recipients found for booking $booking_id");
+    // } else {
+    //     //error_log("Final result for booking $booking_id: " . 
+    //              "$sent_count of " . count($valid_recipients) . " emails processed successfully");
+    // }
     
     return $sent_count > 0;
 }
@@ -842,9 +938,9 @@ function queueEmailsInDatabase($recipients, $subject, $message, $action, $bookin
             $stmt->bind_param("ssssi", $recipient, $subject, $message, $action, $booking_id);
             if ($stmt->execute()) {
                 $queued_count++;
-                error_log("Queued in database: $recipient");
+                //error_log("Queued in database: $recipient");
             } else {
-                error_log("Failed to queue in database: $recipient - " . $stmt->error);
+                //error_log("Failed to queue in database: $recipient - " . $stmt->error);
             }
         }
         
@@ -856,7 +952,7 @@ function queueEmailsInDatabase($recipients, $subject, $message, $action, $bookin
         
     } catch (Exception $e) {
         $mysqli->rollback();
-        error_log("Database queue transaction failed: " . $e->getMessage());
+        //error_log("Database queue transaction failed: " . $e->getMessage());
     }
     
     return $queued_count;
@@ -876,7 +972,7 @@ function triggerLaravelEmailSendBatch($email_data = null) {
         $post_data = json_encode($email_data);
     }
     
-    error_log("Calling Laravel batch API with " . (isset($email_data['recipients']) ? count($email_data['recipients']) : 0) . " recipients");
+   // error_log("Calling Laravel batch API with " . (isset($email_data['recipients']) ? count($email_data['recipients']) : 0) . " recipients");
     
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -893,21 +989,21 @@ function triggerLaravelEmailSendBatch($email_data = null) {
     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     
     if (curl_errno($ch)) {
-        error_log("cURL Error: " . curl_error($ch));
+        //("cURL Error: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     
     curl_close($ch);
     
-    error_log("Batch API Response Code: $http_code");
+    //error_log("Batch API Response Code: $http_code");
     
     if ($http_code === 200) {
         $result = json_decode($response, true);
-        error_log("Batch API Success: " . ($result['message'] ?? 'Processed'));
+       // error_log("Batch API Success: " . ($result['message'] ?? 'Processed'));
         return $result;
     } else {
-        error_log("Batch API Error $http_code: $response");
+       // error_log("Batch API Error $http_code: $response");
         return false;
     }
 }
@@ -1119,7 +1215,7 @@ function update_booking($booking_id, $data) {
         );
         
         if (!$stmt->execute()) {
-            error_log("SQL Error: " . $stmt->error);
+           // error_log("SQL Error: " . $stmt->error);
             throw new Exception('Failed to update booking: ' . $stmt->error);
         }
         
@@ -1207,7 +1303,7 @@ function update_booking($booking_id, $data) {
         
     } catch (Exception $e) {
         $mysqli->rollback();
-        error_log("Transaction failed: " . $e->getMessage());
+        //error_log("Transaction failed: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -1263,7 +1359,7 @@ function send_password_reset($email) {
         $stmt2->bind_param("sii", $token_hash, $expiry_time, $user_id);
         
         if (!$stmt2->execute()) {
-            error_log("Failed to store reset token: " . $stmt2->error);
+            //error_log("Failed to store reset token: " . $stmt2->error);
             $stmt2->close();
             return false;
         }
@@ -1336,12 +1432,12 @@ function send_password_reset($email) {
         // Send email directly to Laravel API (non-blocking)
         sendEmailToLaravelAPI($user_email, $subject, $message, 'confirmation');
         
-        error_log("Password reset email sent to: $user_email (User ID: $user_id)");
+        //error_log("Password reset email sent to: $user_email (User ID: $user_id)");
         return true;
     }
     
     $stmt->close();
-    error_log("Password reset requested for non-existent email: $email");
+   // error_log("Password reset requested for non-existent email: $email");
     return false;
 }
 
@@ -1378,12 +1474,12 @@ function sendEmailToLaravelAPI($recipient, $subject, $body, $type = 'password_re
     curl_close($ch);
     
     if ($httpCode === 200) {
-        error_log("✓ Email sent via Laravel API to: $recipient");
+       // error_log("✓ Email sent via Laravel API to: $recipient");
         return true;
     } else {
-        error_log("✗ Laravel API failed ($httpCode) for: $recipient");
+       // error_log("✗ Laravel API failed ($httpCode) for: $recipient");
         if ($curlError) {
-            error_log("cURL Error: $curlError");
+           // error_log("cURL Error: $curlError");
         }
         // Fallback to direct email if Laravel API fails
     }
@@ -1422,13 +1518,7 @@ function verify_reset_token($token) {
     }
     
     $stmt->close();
-    
-    if ($is_valid) {
-        error_log("Reset token verified for user ID: $user_id_found");
-    } else {
-        error_log("Invalid or expired reset token attempted: $token");
-    }
-    
+
     return $is_valid;
 }
 
@@ -1480,7 +1570,7 @@ function reset_password($token, $new_password) {
         $stmt2->bind_param("si", $password_hash, $user_id_to_update);
         
         if (!$stmt2->execute()) {
-            error_log("Failed to update password: " . $stmt2->error);
+           // error_log("Failed to update password: " . $stmt2->error);
             $stmt2->close();
             return false;
         }
@@ -1489,7 +1579,7 @@ function reset_password($token, $new_password) {
         $stmt2->close();
         
         if ($affected_rows > 0) {
-            error_log("Password reset successfully for user ID: $user_id_to_update");
+           // error_log("Password reset successfully for user ID: $user_id_to_update");
             
             // Get user details for confirmation email
             $stmt3 = $mysqli->prepare("SELECT name, display_name, email FROM mrbs_users WHERE id = ?");
@@ -1559,7 +1649,6 @@ function reset_password($token, $new_password) {
         }
     }
     
-    error_log("Password reset failed - invalid token or user not found");
     return false;
 }
 

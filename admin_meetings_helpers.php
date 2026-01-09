@@ -20,7 +20,6 @@ function create_db_connection() {
         ]);
         return $pdo;
     } catch (\PDOException $e) {
-        error_log("Database connection failed: " . $e->getMessage());
         return null;
     }
 }
@@ -35,7 +34,6 @@ function db_query_one($sql, $params = []) {
         $result = $stmt->fetchColumn();
         return $result ? (int)$result : 0;
     } catch (\PDOException $e) {
-        error_log("Query error: " . $e->getMessage());
         return 0;
     }
 }
@@ -49,7 +47,6 @@ function db_query_all($sql, $params = []) {
         $stmt->execute($params);
         return $stmt->fetchAll(); // returns array of rows
     } catch (\PDOException $e) {
-        error_log("Query error: " . $e->getMessage());
         return [];
     }
 }

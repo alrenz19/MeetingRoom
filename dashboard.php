@@ -16,23 +16,48 @@ $date_display = date('F j, Y', $date_timestamp);
 
 // Get areas
 $areas = get_areas();
+$show_all_rooms = false;
+$all_rooms_grouped = [];
 
-// Get rooms (either all or filtered by area)
-if ($selected_area > 0) {
+// Get rooms based on selection
+if ($selected_area > 0 && $selected_room == 0) {
+    // Specific area selected, All Rooms chosen - show all rooms in that area
     $rooms = get_rooms_by_area($selected_area);
+    
+    // Create grouped structure for the specific area
+    $area_info = get_area_info($selected_area);
+    $all_rooms_grouped = [
+        [
+            'area_id' => $selected_area,
+            'area_name' => $area_info['area_name'] ?? 'Unknown Area',
+            'rooms' => $rooms
+        ]
+    ];
+    $show_all_rooms = true;
+} elseif ($selected_area == 0 && $selected_room == 0) {
+    // All Areas and All Rooms selected - show all rooms from all areas
+    $all_rooms_grouped = get_all_rooms_grouped_by_area();
+    $show_all_rooms = true;
+    $rooms = get_all_rooms(); // For dropdown
+} elseif ($selected_area > 0 && $selected_room > 0) {
+    // Specific room selected
+    $rooms = get_rooms_by_area($selected_area);
+    $show_all_rooms = false;
 } else {
+    // All Areas, specific room (or other combinations)
     $rooms = get_all_rooms();
+    $show_all_rooms = false;
 }
 
 // Time slots for the day (30-minute intervals from 8 AM to 8 PM)
 $time_slots = [];
-$current_time = strtotime($selected_date . " 08:00:00");
-$end_time = strtotime($selected_date . " 16:00:00");
+$current_time = strtotime($selected_date . " 07:00:00");
+$end_time = strtotime($selected_date . " 18:00:00"); // Changed to 5:00 PM
 
 $slot_count = 0;
 while ($current_time < $end_time && $slot_count < 24) {
     $time_slots[] = [
-        'time' => date('H:i', $current_time),
+        'time' => date('g:i A', $current_time),
         'timestamp' => $current_time
     ];
     $current_time += 1800; // 30 minutes
@@ -104,6 +129,107 @@ body {
     box-shadow: 0 10px 30px rgba(0,0,0,0.1);
     overflow: hidden;
     min-height: 100vh;
+}
+
+/* All Rooms View Styles */
+.area-separator {
+    background: #1a56db;
+    color: white;
+    padding: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    margin: 10px 0;
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Smaller room names in all rooms view */
+.room-grid .room-cell {
+    font-size: 0.9rem;
+    padding: 10px;
+}
+
+/* Compact booking events in all rooms view */
+.booking-event .event-title {
+    font-size: 0.7rem;
+}
+
+.booking-event .event-time {
+    font-size: 0.6rem;
+}
+
+/* All Rooms View Improvements */
+.time-cell.available:hover {
+    transform: scale(1.02);
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    cursor: pointer;
+}
+
+.time-cell.booked:hover {
+    cursor: default;
+}
+
+/* Compact booking events */
+.booking-event {
+    padding: 4px;
+}
+
+.booking-event .event-title {
+    font-size: 0.75rem;
+    line-height: 1.2;
+}
+
+.booking-event .event-time {
+    font-size: 0.65rem;
+    opacity: 0.9;
+}
+
+/* Area tabs */
+.area-tabs {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 10px 0;
+    margin-bottom: 20px;
+}
+
+.area-tab {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.area-tab:hover {
+    background: #2563eb;
+    transform: translateY(-2px);
+}
+
+/* Responsive adjustments for all rooms view */
+@media (max-width: 768px) {
+    .room-grid {
+        grid-template-columns: 120px repeat(<?php echo min(count($time_slots), 16); ?>, 1fr);
+    }
+    
+    .room-cell {
+        font-size: 0.9rem;
+        padding: 10px 5px;
+    }
+    
+    .time-header {
+        font-size: 0.75rem;
+        padding: 8px 2px;
+    }
 }
 
 /* Header Styles */
@@ -1500,7 +1626,7 @@ header {
                     <div class="filter-group">
                         <label for="room_filter"><i class="fas fa-door-closed"></i> Select Room</label>
                         <select id="room_filter" name="room" onchange="updateDashboard()">
-                            <option value="0">-- Select a Room --</option>
+                            <option value="0">-- All Rooms --</option>
                             <?php foreach ($rooms as $room): 
                                 $room_label = isset($room['area_name']) 
                                     ? $room['room_name'] . ' (' . $room['area_name'] . ')'
@@ -1558,7 +1684,7 @@ header {
                         <div class="current-date">
                             <i class="fas fa-calendar-day"></i> <?php echo $date_display; ?>
                             <div style="font-size: 1rem; color: #64748b; font-weight: normal; margin-top: 5px;">
-                                <i class="fas fa-clock"></i> Viewing 8:00 AM - 8:00 PM
+                                <i class="fas fa-clock"></i> Viewing 7:00 AM - 5:00 PM
                             </div>
                         </div>
                         <button class="nav-btn" onclick="navigateDate('+1')" title="Next Day">
@@ -1738,7 +1864,255 @@ header {
                             </div>
                         </div>
                     <?php endif; ?>
+                <?php elseif ($show_all_rooms): ?>
+            <!-- All Rooms View -->
+            <?php 
+            // Determine the title based on what's selected
+            if ($selected_area > 0) {
+                // Get area name for the title
+                $area_info = get_area_info($selected_area);
+                $view_title = $area_info['area_name'] . ' - All Rooms';
+                $view_subtitle = 'Viewing all rooms in ' . $area_info['area_name'];
+            } else {
+                $view_title = 'All Rooms Overview';
+                $view_subtitle = 'Viewing all rooms across all areas';
+            }
+            ?>
+    
+    <div class="room-info-card">
+        <div class="room-info-header">
+            <div class="room-title">
+                <i class="fas fa-door-open"></i> <?php echo htmlspecialchars($view_title); ?>
+            </div>
+            <div class="room-status">
+                <i class="fas fa-chart-bar"></i> 
+                <?php 
+                $total_rooms = 0;
+                foreach ($all_rooms_grouped as $area_group) {
+                    $total_rooms += count($area_group['rooms']);
+                }
+                echo $total_rooms . ' rooms available';
+                ?>
+            </div>
+        </div>
+        <div class="room-info-details">
+            <i class="fas fa-calendar-check"></i> 
+            <?php echo htmlspecialchars($view_subtitle); ?> for <?php echo $day_of_week; ?>, <?php echo $date_display; ?>
+            <?php if (!$is_logged_in): ?>
+                <span style="color: #fbbf24; margin-left: 10px;">
+                    <i class="fas fa-exclamation-triangle"></i> Select a specific room to book
+                </span>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Area Tabs for Navigation (only show if viewing all areas) -->
+    <?php if ($selected_area == 0): ?>
+        <div style="margin-bottom: 20px;">
+            <div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 0;">
+                <?php foreach ($all_rooms_grouped as $index => $area_group): ?>
+                    <button onclick="scrollToArea('area-<?php echo $area_group['area_id']; ?>')" 
+                            style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; white-space: nowrap; font-size: 0.9rem;">
+                        <i class="fas fa-building"></i> <?php echo htmlspecialchars($area_group['area_name']); ?>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Areas and Rooms Grids -->
+    <?php foreach ($all_rooms_grouped as $area_group): ?>
+        <div id="area-<?php echo $area_group['area_id']; ?>" class="room-grid-container" style="margin-bottom: 30px;">
+            <!-- Area Header -->
+            <div style="position: sticky; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 15px 20px; border-radius: 8px 8px 0 0; margin-bottom: 15px; overflow-x: hidden;">
+                <h3 style="margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-building"></i> <?php echo htmlspecialchars($area_group['area_name']); ?>
+                    <span style="font-size: 0.9rem; opacity: 0.9;">(<?php echo count($area_group['rooms']); ?> rooms)</span>
+                </h3>
+            </div>
+
+            <!-- Rooms Grid for this Area -->
+            <div class="room-grid" style="grid-template-columns: 140px repeat(<?php echo min(count($time_slots), 24); ?>, 1fr);">
+                <!-- Grid Headers -->
+                <div class="grid-header" style="background: #334155;">Room / Time</div>
+                <?php foreach (array_slice($time_slots, 0, 24) as $slot): ?>
+                    <div class="time-header"><?php echo $slot['time']; ?></div>
+                <?php endforeach; ?>
+                
+                <!-- Rooms in this area -->
+                <?php foreach ($area_group['rooms'] as $room): 
+                    $room_bookings = get_bookings_for_room($room['id'], $selected_date, $selected_date);
+                ?>
+                    <div class="room-cell">
+                        <div style="display: flex; flex-direction: column; align-items: center;">
+                            <span style="font-weight: 600;"><?php echo htmlspecialchars($room['room_name']); ?></span>
+                            <button onclick="openCustomBookingForRoom(<?php echo $room['id']; ?>, <?php echo $area_group['area_id']; ?>, '<?php echo addslashes($room['room_name']); ?>')" 
+                                    style="background: #10b981; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-top: 5px; display: flex; align-items: center; gap: 4px;">
+                                <i class="fas fa-calendar-plus"></i> Book
+                            </button>
+                        </div>
+                    </div>
                     
+                    <!-- Time Cells for this room -->
+                    <?php foreach (array_slice($time_slots, 0, 24) as $slot): 
+                        $slot_start = $slot['timestamp'];
+                        $slot_end = $slot_start + 1800;
+                        $is_booked = false;
+                        $booking_info = null;
+                        
+                        // Check if this slot is booked (with 2-minute buffer)
+                        $buffer = 120;
+                        foreach ($room_bookings as $booking) {
+                            if (!(($slot_end - $buffer) <= $booking['start_time'] || 
+                                ($slot_start + $buffer) >= $booking['end_time'])) {
+                                $is_booked = true;
+                                $booking_info = $booking;
+                                $booking_info['is_current_user'] = is_booking_owner($booking['create_by'] ?? '');
+                                break;
+                            }
+                        }
+                        
+                        // Determine if user can book this slot
+                        $can_book = !$is_booked && $is_logged_in;
+                    ?>
+                        <div class="time-cell <?php echo $is_booked ? 'booked' : 'available'; ?><?php echo ($is_booked && isset($booking_info['is_current_user']) && $booking_info['is_current_user']) ? ' current-user' : ''; ?>" 
+                            data-start="<?php echo date('H:i', $slot_start); ?>"
+                            data-start-timestamp="<?php echo $slot_start; ?>"
+                            data-end="<?php echo date('H:i', $slot_end); ?>"
+                            data-end-timestamp="<?php echo $slot_end; ?>"
+                            data-area-id="<?php echo $area_group['area_id']; ?>"
+                            onclick="<?php echo $can_book ? 'selectSlotFromAllRooms(this, ' . $room['id'] . ', ' . $area_group['area_id'] . ', \'' . addslashes($room['room_name']) . '\')' : 'void(0)'; ?>"
+                            title="<?php echo htmlspecialchars($room['room_name']) . ': ' . ($is_booked ? 'Booked' : 'Available'); ?>">
+                            
+                            <?php if ($is_booked && $booking_info): ?>
+                                <div class="booking-event <?php 
+                                    echo $booking_info['type'] == 'I' ? 'internal' : 'external';
+                                    echo $booking_info['status'] == 1 ? ' tentative' : '';
+                                    echo (isset($booking_info['is_current_user']) && $booking_info['is_current_user']) ? ' current-user' : '';
+                                ?>"
+                                onclick="showBookingDetails(<?php echo htmlspecialchars(json_encode($booking_info)); ?>)"
+                                title="Click to view booking details">
+                                    <div class="event-title">
+                                        <?php echo htmlspecialchars(substr($booking_info['name'], 0, 10)); ?>...
+                                    </div>
+                                    <div class="event-time">
+                                        <?php echo date('H:i', $booking_info['start_time']); ?>
+                                    </div>
+                                </div>
+                            <?php elseif (!$is_booked): ?>
+                                <?php if ($is_logged_in): ?>
+                                    <div style="padding: 8px; text-align: center;">
+                                        <i class="fas fa-check-circle" style="color: #10b981; font-size: 0.9rem;"></i>
+                                        <div style="font-size: 0.7rem; color: #065f46; margin-top: 2px;">Available</div>
+                                    </div>
+                                <?php else: ?>
+                                    <div style="padding: 8px; text-align: center;">
+                                        <i class="fas fa-check-circle" style="color: #10b981; font-size: 0.9rem;"></i>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endforeach; ?>
+
+    <!-- Quick Book Panel for All Rooms View -->
+    <div class="quick-book-panel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fas fa-list"></i> Room Availability Summary
+            </div>
+            <div class="slot-count">
+                <?php echo $selected_area > 0 ? htmlspecialchars($view_title) : "Today's Overview"; ?>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+                <?php foreach ($all_rooms_grouped as $area_group): ?>
+                    <div style="background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #3b82f6;">
+                        <h4 style="color: #1e40af; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                            <i class="fas fa-building"></i> <?php echo htmlspecialchars($area_group['area_name']); ?>
+                        </h4>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <?php foreach ($area_group['rooms'] as $room): 
+                                $room_bookings = get_bookings_for_room($room['id'], $selected_date, $selected_date);
+                                $available_count = 0;
+                                $total_slots = count($time_slots);
+                                
+                                foreach ($time_slots as $slot) {
+                                    $slot_start = $slot['timestamp'];
+                                    $slot_end = $slot_start + 1800;
+                                    $is_booked = false;
+                                    
+                                    $buffer = 120;
+                                    foreach ($room_bookings as $booking) {
+                                        if (!(($slot_end - $buffer) <= $booking['start_time'] || 
+                                            ($slot_start + $buffer) >= $booking['end_time'])) {
+                                            $is_booked = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (!$is_booked) {
+                                        $available_count++;
+                                    }
+                                }
+                                
+                                $availability_percentage = $total_slots > 0 ? round(($available_count / $total_slots) * 100) : 0;
+                            ?>
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f8fafc; border-radius: 6px; transition: all 0.3s; cursor: pointer;" 
+                                     onmouseover="this.style.background='#e0f2fe'" 
+                                     onmouseout="this.style.background='#f8fafc'"
+                                     onclick="selectRoom(<?php echo $room['id']; ?>)">
+                                    <div>
+                                        <div style="font-weight: 600; color: #1e293b;"><?php echo htmlspecialchars($room['room_name']); ?></div>
+                                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                                            <div style="width: 60px; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">
+                                                <div style="width: <?php echo $availability_percentage; ?>%; height: 100%; background: <?php echo $availability_percentage > 50 ? '#10b981' : ($availability_percentage > 20 ? '#f59e0b' : '#ef4444'); ?>;"></div>
+                                            </div>
+                                            <span style="font-size: 0.85rem; color: <?php echo $availability_percentage > 50 ? '#10b981' : ($availability_percentage > 20 ? '#92400e' : '#dc2626'); ?>;">
+                                                <?php echo $availability_percentage; ?>% available
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; align-items: center; min-width: 60px;">
+                                        <span style="font-size: 1.1rem; font-weight: 700; color: #1e40af;">
+                                            <?php echo $available_count; ?>
+                                        </span>
+                                        <span style="font-size: 0.8rem; color: #64748b;">slots</span>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h4 style="color: #1e293b; margin-bottom: 5px;">Need to book a room?</h4>
+                    <p style="color: #64748b; font-size: 0.95rem; margin: 0;">
+                        Click on any available time slot or use the "Book" button next to a room name.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="navigateDate('-1')" 
+                            style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-chevron-left"></i> Previous Day
+                    </button>
+                    <button onclick="navigateDate('+1')" 
+                            style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        Next Day <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
                 <?php else: ?>
                     <!-- Empty State - No Room Selected -->
                     <div class="empty-state">
@@ -2615,31 +2989,43 @@ header {
             const startTimestamp = element.getAttribute('data-start-timestamp');
             const endTimestamp = element.getAttribute('data-end-timestamp');
             
-            console.log('Selected available slot:', startTime, 'to', endTime, 'timestamps:', startTimestamp, endTimestamp);
-            
             openBookingFormWithSlot(startTime, endTime, startTimestamp, endTimestamp);
         }
         
         // Open booking form with pre-filled time slot
-        function openBookingFormWithSlot(startTime, endTime, startTimestamp, endTimestamp) {
-            const roomName = '<?php echo addslashes($room_name); ?>';
+        function openBookingFormWithSlot(startTime, endTime, startTimestamp, endTimestamp, customRoomId = null, customAreaId = null, customRoomName = null) {
+            const roomName = customRoomName || '<?php echo addslashes($room_name); ?>';
             const areaName = '<?php echo addslashes($area_name); ?>';
+            const roomId = customRoomId || <?php echo $selected_room; ?>;
+            const areaId = customAreaId || <?php echo $selected_area; ?>;
             const dateDisplay = '<?php echo $date_display; ?>';
             const selectedDate = '<?php echo $selected_date; ?>';
+            
+            // Get area name if we have area ID
+            let finalAreaName = areaName;
+            if (areaId === 0 && roomId > 0) {
+                // Try to get area name from room
+                finalAreaName = getAreaNameByRoomId(roomId) || 'All Areas';
+            }
             
             // Update the slot information display
             document.getElementById('slotDetails').innerHTML = `
                 <i class="fas fa-door-open"></i> ${roomName}<br>
-                <i class="fas fa-building"></i> ${areaName}<br>
+                <i class="fas fa-building"></i> ${finalAreaName}<br>
                 <i class="fas fa-calendar-day"></i> ${dateDisplay}<br>
                 <i class="fas fa-clock"></i> ${startTime} - ${endTime}
             `;
+            
+            // Update the room name in the modal
+            document.getElementById('selectedRoomName').textContent = roomName;
             
             // Set the time inputs
             document.getElementById('start_time_input').value = startTime;
             document.getElementById('end_time_input').value = endTime;
             
-            // Set the hidden timestamp fields
+            // Set the hidden fields
+            document.getElementById('booking_room_id').value = roomId;
+            document.getElementById('booking_area_id').value = areaId;
             document.getElementById('booking_start_time').value = startTimestamp;
             document.getElementById('booking_end_time').value = endTimestamp;
             
@@ -2652,8 +3038,28 @@ header {
             // Check for conflicts
             checkForConflicts();
             
+            // Show external fields if needed
+            toggleExternalFields();
+            
             // Show the modal
             document.getElementById('bookingModal').style.display = 'flex';
+        }
+
+        // Helper function to get area name by room ID (you might need to implement this)
+        function getAreaNameByRoomId(roomId) {
+            // This would ideally fetch from your data
+            // For now, check the room dropdown
+            const roomSelect = document.getElementById('room_filter');
+            if (roomSelect) {
+                const option = roomSelect.querySelector(`option[value="${roomId}"]`);
+                if (option) {
+                    const text = option.textContent;
+                    // Extract area name from "Room Name (Area Name)" format
+                    const match = text.match(/\((.*?)\)$/);
+                    return match ? match[1] : 'Unknown Area';
+                }
+            }
+            return null;
         }
         
         // Open booking form for custom time (default to next available hour)
@@ -2737,14 +3143,22 @@ header {
                 const submitBtn = document.getElementById('submitBookingBtn');
                 
                 if (data.hasConflicts) {
-                    let message = 'Time slot conflicts with existing bookings. ';
+                    let message = 'Time slot conflicts with existing bookings:<br>';
+                    
+                    // List conflicting bookings
+                    if (data.conflicts && data.conflicts.length > 0) {
+                        data.conflicts.forEach(conflict => {
+                            message += `• ${conflict.name}: ${conflict.start_time} - ${conflict.end_time}<br>`;
+                        });
+                    }
                     
                     if (data.canAdjust) {
-                        message += 'System will automatically adjust times by 2 minutes to avoid conflicts.';
+                        message += `<br>System will adjust to: ${data.adjustedTimes.start_formatted} - ${data.adjustedTimes.end_formatted}`;
                         submitBtn.innerHTML = '<i class="fas fa-clock"></i> Book with Time Adjustment';
                         submitBtn.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                        submitBtn.disabled = false;
                     } else {
-                        message += 'Please choose a different time.';
+                        message += '<br>Cannot adjust times. Please choose a different time.';
                         submitBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Cannot Book (Conflict)';
                         submitBtn.disabled = true;
                         submitBtn.style.background = '#ef4444';
@@ -2760,6 +3174,10 @@ header {
                 }
             } catch (error) {
                 console.error('Error checking conflicts:', error);
+                const conflictWarning = document.getElementById('conflictWarning');
+                const conflictMessage = document.getElementById('conflictMessage');
+                conflictMessage.innerHTML = 'Error checking availability. Please try again.';
+                conflictWarning.style.display = 'block';
             } finally {
                 isCheckingConflicts = false;
             }
@@ -2774,6 +3192,7 @@ header {
             let url = `dashboard.php?date=${date}`;
             if (areaId > 0) url += `&area=${areaId}`;
             if (roomId > 0) url += `&room=${roomId}`;
+            // Note: if roomId is 0 (All Rooms), we don't add the room parameter
             
             window.location.href = url;
         }
@@ -2785,8 +3204,191 @@ header {
             
             let url = `dashboard.php?date=${date}`;
             if (areaId > 0) url += `&area=${areaId}`;
+            // Reset room to "All Rooms" when area changes
+            // Don't add room parameter if it's 0
             
             window.location.href = url;
+        }
+
+        // Select a room from the all rooms view
+        function selectRoom(roomId) {
+            const areaId = document.getElementById('area_filter').value;
+            const date = '<?php echo $selected_date; ?>';
+            
+            let url = `dashboard.php?date=${date}`;
+            if (areaId > 0) url += `&area=${areaId}`;
+            url += `&room=${roomId}`;
+            
+            window.location.href = url;
+        }
+
+        // Open custom booking for a specific room from all rooms view
+        function openCustomBookingForRoom(roomId, areaId, roomName) {
+            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
+                showLoginAlert();
+                return;
+            }
+            
+            const areaName = getAreaNameById(areaId);
+            const dateDisplay = '<?php echo $date_display; ?>';
+            const selectedDate = '<?php echo $selected_date; ?>';
+            
+            // Set the room and area IDs
+            document.getElementById('booking_room_id').value = roomId;
+            document.getElementById('booking_area_id').value = areaId;
+            
+            // Set the room name
+            document.getElementById('selectedRoomName').textContent = roomName;
+            
+            document.getElementById('slotDetails').innerHTML = `
+                <i class="fas fa-door-open"></i> ${roomName}<br>
+                <i class="fas fa-building"></i> ${areaName}<br>
+                <i class="fas fa-calendar-day"></i> ${dateDisplay}<br>
+                <i class="fas fa-clock"></i> Custom time selection
+            `;
+            
+            // Set default times (next hour from now)
+            const now = new Date();
+            let nextHour = now.getHours() + 1;
+            if (nextHour > 23) nextHour = 0;
+            
+            const startTime = nextHour.toString().padStart(2, '0') + ':00';
+            const endTime = (nextHour + 1).toString().padStart(2, '0') + ':00';
+            
+            document.getElementById('start_time_input').value = startTime;
+            document.getElementById('end_time_input').value = endTime;
+            
+            // Calculate timestamps
+            const startDateTimeLocal = new Date(selectedDate + 'T' + startTime);
+            const endDateTimeLocal = new Date(selectedDate + 'T' + endTime);
+            
+            const startTimestamp = Math.floor(startDateTimeLocal.getTime() / 1000);
+            const endTimestamp = Math.floor(endDateTimeLocal.getTime() / 1000);
+            
+            document.getElementById('booking_start_time').value = startTimestamp;
+            document.getElementById('booking_end_time').value = endTimestamp;
+            
+            // Hide conflict warning initially
+            document.getElementById('conflictWarning').style.display = 'none';
+            
+            // Calculate duration
+            calculateDuration();
+            
+            // Check for conflicts
+            setTimeout(() => checkForConflicts(), 100);
+            
+            document.getElementById('bookingModal').style.display = 'flex';
+        }
+
+        // Scroll to specific area
+        function scrollToArea(areaId) {
+            const element = document.getElementById(areaId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        
+      // Select slot from all rooms view - OPEN MODAL DIRECTLY
+        function selectSlotFromAllRooms(element, roomId, areaId = null, roomName = '') {
+            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
+                showLoginAlert();
+                return;
+            }
+            
+            // Get the area ID
+            let areaIdToUse = areaId;
+            if (!areaIdToUse) {
+                areaIdToUse = element.getAttribute('data-area-id');
+            }
+            
+            // Get room name
+            let roomNameToUse = roomName;
+            if (!roomNameToUse) {
+                // Try to get from the room cell
+                const roomCell = element.closest('.room-grid')?.querySelector(`.room-cell:has(button)`);
+                if (roomCell) {
+                    roomNameToUse = roomCell.querySelector('span')?.textContent || 'Room ' + roomId;
+                }
+            }
+            
+            // Get area name
+            const areaName = getAreaNameById(areaIdToUse);
+            
+            // Get the slot times
+            const startTime = element.getAttribute('data-start');
+            const endTime = element.getAttribute('data-end');
+            const startTimestamp = element.getAttribute('data-start-timestamp');
+            const endTimestamp = element.getAttribute('data-end-timestamp');
+            
+            // Set the room and area IDs in the booking form
+            document.getElementById('booking_room_id').value = roomId;
+            document.getElementById('booking_area_id').value = areaIdToUse;
+            
+            // Set the room name in the display
+            document.getElementById('selectedRoomName').textContent = roomNameToUse;
+            
+            // Update the slot information display
+            document.getElementById('slotDetails').innerHTML = `
+                <i class="fas fa-door-open"></i> ${roomNameToUse}<br>
+                <i class="fas fa-building"></i> ${areaName}<br>
+                <i class="fas fa-calendar-day"></i> <?php echo $date_display; ?><br>
+                <i class="fas fa-clock"></i> ${startTime} - ${endTime}
+            `;
+            
+            // Set the time inputs
+            document.getElementById('start_time_input').value = startTime;
+            document.getElementById('end_time_input').value = endTime;
+            
+            // Calculate timestamps for the selected date
+            const selectedDate = '<?php echo $selected_date; ?>';
+            const startDateTimeLocal = new Date(selectedDate + 'T' + startTime);
+            const endDateTimeLocal = new Date(selectedDate + 'T' + endTime);
+            
+            // Convert to timestamps
+            const calculatedStartTimestamp = Math.floor(startDateTimeLocal.getTime() / 1000);
+            const calculatedEndTimestamp = Math.floor(endDateTimeLocal.getTime() / 1000);
+            
+            // Use the provided timestamps or calculate new ones
+            const finalStartTimestamp = startTimestamp || calculatedStartTimestamp;
+            const finalEndTimestamp = endTimestamp || calculatedEndTimestamp;
+            
+            document.getElementById('booking_start_time').value = finalStartTimestamp;
+            document.getElementById('booking_end_time').value = finalEndTimestamp;
+            
+            // Hide conflict warning initially
+            document.getElementById('conflictWarning').style.display = 'none';
+            const submitBtn = document.getElementById('submitBookingBtn');
+            submitBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Booking';
+            submitBtn.disabled = false;
+            submitBtn.style.background = 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)';
+            
+            // Update duration display
+            calculateDuration();
+            
+            // Check for conflicts
+            setTimeout(() => checkForConflicts(), 100);
+            
+            // Show external fields if needed
+            toggleExternalFields();
+            
+            // Show the modal
+            document.getElementById('bookingModal').style.display = 'flex';
+        }
+
+        // Helper function to get area name by ID
+        function getAreaNameById(areaId) {
+            // You might need to implement this based on your data
+            // For now, return a placeholder
+            if (areaId > 0) {
+                // If you have area data loaded, use it
+                const areaSelect = document.getElementById('area_filter');
+                if (areaSelect) {
+                    const option = areaSelect.querySelector(`option[value="${areaId}"]`);
+                    if (option) return option.textContent;
+                }
+            }
+            return 'All Areas';
         }
         
         // Navigate to previous/next day
@@ -2863,10 +3465,22 @@ header {
         
         // Toggle external fields based on event type
         function toggleExternalFields() {
-            const eventType = document.querySelector('select[name="event_type"]').value;
+            const bookingModal = document.getElementById('bookingModal');
+            if (!bookingModal) {
+                console.error('Booking modal not found!');
+                return;
+            }
+
+            const eventTypeSelect = bookingModal.querySelector('select[name="event_type"]');
+            if (!eventTypeSelect) {
+                console.error('Event type select not found in booking modal!');
+                return;
+            }
+            
+            const eventType = eventTypeSelect.value;
             const externalFields = document.getElementById('externalFields');
             const representativeInput = document.getElementById('representative');
-            
+
             if (eventType === 'E') {
                 externalFields.style.display = 'block';
                 if (representativeInput) representativeInput.required = true;
@@ -2950,6 +3564,9 @@ header {
             const endDate = this.querySelector('[name="end_date"]').value;
             const endTime = this.querySelector('[name="end_time_input"]').value;
             const eventType = this.querySelector('[name="event_type"]').value;
+            const roomId = document.getElementById('booking_room_id').value;
+            
+            console.log('Submitting booking for Room:', roomId);
             
             if (!eventName) {
                 alert('Please enter an event name.');
@@ -2961,6 +3578,11 @@ header {
                 return false;
             }
             
+            if (!roomId || roomId === '0') {
+                alert('Please select a specific room to book.');
+                return false;
+            }
+            
             if (eventType === 'E') {
                 const representative = this.querySelector('[name="representative"]').value.trim();
                 if (!representative) {
@@ -2968,7 +3590,6 @@ header {
                     return false;
                 }
                 
-                // Check if at least one preparation is selected
                 const preparations = this.querySelectorAll('input[name^="needs_"]:checked');
                 const otherPreparations = this.querySelector('[name="other_preparations"]').value.trim();
                 
@@ -2990,10 +3611,10 @@ header {
             // Show confirmation if there are conflicts
             const conflictWarning = document.getElementById('conflictWarning');
             if (conflictWarning.style.display === 'block') {
+                const conflictMessage = document.getElementById('conflictMessage').innerHTML;
                 const confirmed = confirm(
-                    'Warning: This time slot conflicts with existing bookings.\n\n' +
-                    'The system will automatically adjust your booking times by 2 minutes to avoid conflicts.\n\n' +
-                    'Do you want to proceed?'
+                    'Warning: ' + conflictMessage.replace(/<br>/g, '\n').replace(/<[^>]*>/g, '') + 
+                    '\n\nDo you want to proceed?'
                 );
                 
                 if (!confirmed) {
@@ -3002,6 +3623,7 @@ header {
             }
             
             // Submit form
+            console.log('Form submitted successfully');
             this.submit();
             return true;
         });
@@ -3023,7 +3645,7 @@ header {
             // Format dates
             const startDate = new Date(booking.start_time * 1000);
             const endDate = new Date(booking.end_time * 1000);
-            const createdDate = new Date(booking.created_at * 1000);
+            const createdDate = new Date(booking.timestamp);
             
             // Calculate duration
             const durationMs = endDate - startDate;
@@ -3040,13 +3662,13 @@ header {
             
             // Set booking details
             document.getElementById('detailEventName').textContent = booking.name || 'N/A';
-            document.getElementById('detailBookedBy').textContent = booking.create_by || 'Unknown';
+            document.getElementById('detailBookedBy').textContent = booking.display_name || 'Unknown';
             document.getElementById('detailEventType').textContent = booking.type === 'I' ? 'Internal Meeting' : 'External Event';
-            document.getElementById('detailRoomName').textContent = '<?php echo htmlspecialchars($room_name); ?>';
+            document.getElementById('detailRoomName').textContent = booking.room_name || '<?php echo htmlspecialchars($room_name); ?>';
             document.getElementById('detailDate').textContent = startDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
             document.getElementById('detailTime').textContent = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) + ' - ' + endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             document.getElementById('detailDuration').textContent = durationText;
-            document.getElementById('detailCreated').textContent = createdDate.toLocaleString('en-US');
+            document.getElementById('detailCreated').textContent = createdDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
             document.getElementById('detailDescription').textContent = booking.description || 'No description provided.';
             
             // Set status badge
@@ -3227,6 +3849,7 @@ header {
                         
                         // Check for conflicts
                         checkEditConflicts();
+                        toggleEditExternalFields();
                         
                         // Show the edit modal
                         document.getElementById('editBookingModal').style.display = 'flex';
@@ -3243,10 +3866,22 @@ header {
 
         // Add the missing functions
         function toggleEditExternalFields() {
-            const eventType = document.getElementById('edit_event_type').value;
+            const editBookingModal = document.getElementById('editBookingModal');
+            if (!editBookingModal) {
+                console.error('Booking modal not found!');
+                return;
+            }
+
+            const eventTypeSelect = editBookingModal.querySelector('select[name="event_type"]');
+            if (!eventTypeSelect) {
+                console.error('Event type select not found in booking modal!');
+                return;
+            }
+            
+            const eventType = eventTypeSelect.value;
             const externalFields = document.getElementById('editExternalFields');
             const representativeInput = document.getElementById('edit_representative');
-            
+            console.log('test')
             if (eventType === 'E') {
                 externalFields.style.display = 'block';
                 if (representativeInput) representativeInput.required = true;
@@ -3323,14 +3958,22 @@ header {
                 const submitBtn = document.getElementById('editSubmitBookingBtn');
                 
                 if (data.hasConflicts) {
-                    let message = 'Time slot conflicts with existing bookings. ';
+                    let message = 'Time slot conflicts with existing bookings:<br>';
+                    
+                    // List conflicting bookings
+                    if (data.conflicts && data.conflicts.length > 0) {
+                        data.conflicts.forEach(conflict => {
+                            message += `• ${conflict.name}: ${conflict.start_time} - ${conflict.end_time}<br>`;
+                        });
+                    }
                     
                     if (data.canAdjust) {
-                        message += 'System will automatically adjust times by 2 minutes to avoid conflicts.';
+                        message += `<br>System will adjust to: ${data.adjustedTimes.start_formatted} - ${data.adjustedTimes.end_formatted}`;
                         submitBtn.innerHTML = '<i class="fas fa-clock"></i> Update with Time Adjustment';
                         submitBtn.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                        submitBtn.disabled = false;
                     } else {
-                        message += 'Please choose a different time.';
+                        message += '<br>Cannot adjust times. Please choose a different time.';
                         submitBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Cannot Update (Conflict)';
                         submitBtn.disabled = true;
                         submitBtn.style.background = '#ef4444';
@@ -3346,6 +3989,10 @@ header {
                 }
             } catch (error) {
                 console.error('Error checking conflicts:', error);
+                const conflictWarning = document.getElementById('editConflictWarning');
+                const conflictMessage = document.getElementById('editConflictMessage');
+                conflictMessage.innerHTML = 'Error checking availability. Please try again.';
+                conflictWarning.style.display = 'block';
             } finally {
                 isCheckingConflicts = false;
             }
@@ -3353,6 +4000,72 @@ header {
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
+            const pendingBooking = sessionStorage.getItem('pendingBooking');
+            if (pendingBooking) {
+                const slotData = JSON.parse(pendingBooking);
+                sessionStorage.removeItem('pendingBooking');
+                
+                // Wait a bit for the page to load completely and grid to render
+                setTimeout(function() {
+                    // Check if we're on a specific room page (not all rooms view)
+                    const isSpecificRoom = <?php echo ($selected_room > 0 && !$show_all_rooms) ? 'true' : 'false'; ?>;
+                    
+                    if (isSpecificRoom) {
+                        // Find the time cell with matching data
+                        const timeCells = document.querySelectorAll('.time-cell');
+                        let foundCell = null;
+                        
+                        timeCells.forEach(cell => {
+                            const cellStart = cell.getAttribute('data-start');
+                            const cellEnd = cell.getAttribute('data-end');
+                            
+                            // Try to match times (account for different formats)
+                            if (cellStart && cellEnd) {
+                                // Normalize time formats for comparison
+                                const normalizeTime = (timeStr) => {
+                                    // Convert "8:00 AM" to "08:00" format
+                                    if (timeStr.includes('AM') || timeStr.includes('PM')) {
+                                        const time = new Date('1970-01-01 ' + timeStr);
+                                        return time.getHours().toString().padStart(2, '0') + ':' + 
+                                            time.getMinutes().toString().padStart(2, '0');
+                                    }
+                                    return timeStr;
+                                };
+                                
+                                const normalizedCellStart = normalizeTime(cellStart);
+                                const normalizedSlotStart = normalizeTime(slotData.startTime);
+                                const normalizedCellEnd = normalizeTime(cellEnd);
+                                const normalizedSlotEnd = normalizeTime(slotData.endTime);
+                                
+                                if (normalizedCellStart === normalizedSlotStart && 
+                                    normalizedCellEnd === normalizedSlotEnd) {
+                                    foundCell = cell;
+                                }
+                            }
+                        });
+                        
+                        if (foundCell) {
+                            // Check if the cell is available
+                            if (foundCell.classList.contains('available')) {
+                                // Trigger the click event
+                                foundCell.click();
+                            } else {
+                                // If not available, maybe it's now booked, show an alert
+                                alert('This time slot is no longer available. Please select another slot.');
+                            }
+                        } else {
+                            // Couldn't find the cell, open the booking form with the stored times
+                            openBookingFormWithSlot(
+                                slotData.startTime, 
+                                slotData.endTime, 
+                                slotData.startTimestamp, 
+                                slotData.endTimestamp
+                            );
+                        }
+                    }
+                }, 1000); // Increased delay to ensure page is fully loaded
+            }
+
             // Set min date for date pickers
             const today = new Date().toISOString().split('T')[0];
             const datePicker = document.getElementById('date_picker');

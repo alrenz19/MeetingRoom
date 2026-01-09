@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $end_time = (int)$_POST['end_time'];
     $booking_id = isset($_POST['booking_id']) ? (int)$_POST['booking_id'] : null;
     
-    // Check for conflicts
+    // Check for conflicts with buffer
     $conflicts = check_booking_conflict_with_buffer($room_id, $start_time, $end_time, $booking_id);
     
     if (!empty($conflicts)) {
@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'end_time' => date('g:i A', $conflict['end_time'])
                 ];
             }, $conflicts),
-            'canAdjust' => !empty($adjustment['adjustments']),
+            'canAdjust' => !$adjustment['has_conflicts'],
             'adjustmentInfo' => $adjustment['adjustments'],
             'adjustedTimes' => [
                 'start' => $adjustment['adjusted_start'],

@@ -17,7 +17,7 @@ function create_db_connection() {
         ]);
         return $pdo;
     } catch (\PDOException $e) {
-        error_log("Database connection failed: " . $e->getMessage());
+       // error_log("Database connection failed: " . $e->getMessage());
         return null;
     }
 }
@@ -33,7 +33,7 @@ function db_query_one($sql, $params = []) {
         $result = $stmt->fetchColumn();
         return $result ? (int)$result : 0;
     } catch (\PDOException $e) {
-        error_log("Query error: " . $e->getMessage());
+       // error_log("Query error: " . $e->getMessage());
         return 0;
     }
 }
@@ -47,7 +47,7 @@ function db_query_all($sql, $params = []) {
         $stmt->execute($params);
         return $stmt->fetchAll();
     } catch (\PDOException $e) {
-        error_log("Query error: " . $e->getMessage());
+       // error_log("Query error: " . $e->getMessage());
         return [];
     }
 }
@@ -60,7 +60,7 @@ function db_command($sql, $params = []) {
         $stmt = $pdo->prepare($sql);
         return $stmt->execute($params);
     } catch (\PDOException $e) {
-        error_log("Command error: " . $e->getMessage());
+       // error_log("Command error: " . $e->getMessage());
         return false;
     }
 }
@@ -95,7 +95,7 @@ try {
     $total_meetings = db_query_one($count_sql);
     $total_pages = ceil($total_meetings / $per_page);
 } catch (Exception $e) {
-    error_log("Count query error: " . $e->getMessage());
+   // error_log("Count query error: " . $e->getMessage());
     $total_meetings = 0;
     $total_pages = 1;
 }
@@ -209,7 +209,7 @@ try {
     }
 } catch (Exception $e) {
     // Log error but don't crash the page
-    error_log("Admin meetings error: " . $e->getMessage());
+    //error_log("Admin meetings error: " . $e->getMessage());
     $meetings = [];
     $total_meetings = 0;
     $total_pages = 1;
@@ -234,7 +234,7 @@ if (isset($_POST['action']) && is_logged_in() && is_admin()) {
                     header("Location: admin_meetings.php?page=" . $current_page);
                     exit;
                 } catch (Exception $e) {
-                    error_log("Delete error: " . $e->getMessage());
+                    //error_log("Delete error: " . $e->getMessage());
                 }
             }
             break;
