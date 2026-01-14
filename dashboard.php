@@ -3566,8 +3566,6 @@ header {
             const eventType = this.querySelector('[name="event_type"]').value;
             const roomId = document.getElementById('booking_room_id').value;
             
-            console.log('Submitting booking for Room:', roomId);
-            
             if (!eventName) {
                 alert('Please enter an event name.');
                 return false;
@@ -3592,11 +3590,6 @@ header {
                 
                 const preparations = this.querySelectorAll('input[name^="needs_"]:checked');
                 const otherPreparations = this.querySelector('[name="other_preparations"]').value.trim();
-                
-                if (preparations.length === 0 && !otherPreparations) {
-                    alert('Please specify at least one preparation needed for external events.');
-                    return false;
-                }
             }
             
             // Validate date/time
@@ -3623,7 +3616,6 @@ header {
             }
             
             // Submit form
-            console.log('Form submitted successfully');
             this.submit();
             return true;
         });
@@ -4155,11 +4147,7 @@ header {
         // Check if at least one preparation is selected
         const preparations = document.querySelectorAll('#editExternalFields input[type="checkbox"]:checked');
         const otherPreparations = document.getElementById('edit_other_preparations').value.trim();
-        
-        if (preparations.length === 0 && !otherPreparations) {
-            alert('Please specify at least one preparation needed for external events.');
-            return false;
-        }
+
     }
     
     // Validate date/time

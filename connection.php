@@ -11,6 +11,15 @@ define('DB_PASS', 'MrbsPassword123!');
 // Connect to database using mysqli
 $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
+$dbSecondPass = '$oaQooIj7_6981';
+
+//$connSecond = new mysqli("172.16.131.229", "catshatecoffeer", $dbSecondPass, "db_portal");
+$connSecond = new mysqli("127.0.0.1", "catshatecoffeer", $dbSecondPass, "db_portal");
+
+if ($connSecond->connect_error) {
+    die("Second DB Connection failed: " . $connSecond->connect_error);
+}
+
 // Check connection
 if ($mysqli->connect_error) {
     die("Connection failed: " . $mysqli->connect_error);
@@ -454,6 +463,22 @@ function adjust_booking_times($room_id, $start_time, $end_time, $buffer_minutes 
         'original_end' => $end_time,
         'conflicts' => $conflicts
     ];
+}
+
+function create_welcome($representative, $room_id, $start, $end) {
+    global $connSecond;
+    
+    $area_name = get_area_name_by_room($room_id);
+    $factory = ($area_name == "TFCD F1") ? "TFCD" : (($area_name == "TFCD F6") ? "F6" : "TCM");
+
+    $stmt = $connSecond->prepare("
+        INSERT INTO welcome_page 
+        (name, factory, starttime, endtime, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+    ");
+    $stmt->bind_param("ssss", $representative, $factory, $start, $end);
+    $stmt->execute();
+    $stmt->close();
 }
 
 // Create booking with buffer system

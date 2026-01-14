@@ -42,10 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             !empty($_POST['needs_snacks']) || !empty($_POST['other_preparations'])) {
             $has_preparations = true;
         }
-        
-        if (!$has_preparations) {
-            $error_message = "At least one preparation is required for external events.";
-        }
     }
     
     if (!isset($error_message)) {
@@ -113,7 +109,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($event_type === 'E') {
             $booking_data['representative_name'] = $representative ?? '';
             $booking_data['representative_email'] = ''; // No email for representative
-            $booking_data['preparations'] = $preparations;
+            if (!empty($preparations))
+                $booking_data['preparations'] = $preparations;
+            
+            create_welcome($representative, $room_id, $_POST['start_date'], $_POST['end_date']);
         }
         
         // Add notification emails if provided
